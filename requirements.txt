@@ -1,0 +1,10 @@
+PyQt5>=5.15.0
+qt-material>=2.14
+pyqtgraph>=0.12.4
+openpyxl>=3.0.10
+qrcode>=7.4.2
+Pillow>=9.5.0
+pyserial>=3.5
+reportlab>=4.0.0
+cryptography>=3.4.8
+requests>=2.25.0
