@@ -39,10 +39,7 @@ jobs:
           --hidden-import qtawesome `
           main_pyqt5.py
 
-    - name: Install Inno Setup
-      run: choco install innosetup --version=6.2.2 -y
-
-    - name: Build Installer
+    - name: Build Installer (Inno Setup)
       run: iscc setup.iss
 
     - name: Upload Installer (setup.exe)
