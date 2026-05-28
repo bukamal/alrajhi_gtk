@@ -18,7 +18,7 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
@@ -28,7 +28,7 @@ jobs:
       run: |
         curl -L -o libzbar-64.dll https://github.com/NaturalHistoryMuseum/ZBarWin64/raw/master/libzbar-64.dll
 
-    - name: Build with PyInstaller (onedir)
+    - name: Build Portable App with PyInstaller
       run: |
         pyinstaller --onedir --windowed --icon=alrajhi_icon.ico --name "AlrajhiAccounting" `
           --add-data "data;data" `
@@ -49,22 +49,20 @@ jobs:
           --collect-all cv2 `
           main_pyqt5.py
 
-    - name: Download Inno Setup (command-line)
-      run: |
-        curl -L -o is.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
-        start /wait is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+    - name: Install Inno Setup (using Chocolatey)
+      run: choco install innosetup -y
 
     - name: Build Installer using Inno Setup
       run: iscc setup.iss
 
-    - name: Upload Installer (setup.exe)
-      uses: actions/upload-artifact@v4
-      with:
-        name: AlrajhiAccounting-Setup
-        path: Output/AlrajhiAccounting_Setup.exe
-
-    - name: Upload Portable App Folder (optional)
+    - name: Upload Portable App Folder
       uses: actions/upload-artifact@v4
       with:
         name: AlrajhiAccounting-Portable
         path: dist/AlrajhiAccounting/
+
+    - name: Upload Setup Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: AlrajhiAccounting-Setup
+        path: Output/AlrajhiAccounting_Setup.exe
