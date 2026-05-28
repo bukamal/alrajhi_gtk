@@ -18,7 +18,7 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
@@ -28,7 +28,7 @@ jobs:
       run: |
         curl -L -o libzbar-64.dll https://github.com/NaturalHistoryMuseum/ZBarWin64/raw/master/libzbar-64.dll
 
-    - name: Build Portable App with PyInstaller
+    - name: Build with PyInstaller (onedir)
       run: |
         pyinstaller --onedir --windowed --icon=alrajhi_icon.ico --name "AlrajhiAccounting" `
           --add-data "data;data" `
@@ -55,14 +55,14 @@ jobs:
     - name: Build Installer using Inno Setup
       run: iscc setup.iss
 
+    - name: Upload Installer (setup.exe)
+      uses: actions/upload-artifact@v4
+      with:
+        name: AlrajhiAccounting-Setup
+        path: Output/AlrajhiAccounting_Setup.exe
+
     - name: Upload Portable App Folder
       uses: actions/upload-artifact@v4
       with:
         name: AlrajhiAccounting-Portable
         path: dist/AlrajhiAccounting/
-
-    - name: Upload Setup Executable
-      uses: actions/upload-artifact@v4
-      with:
-        name: AlrajhiAccounting-Setup
-        path: Output/AlrajhiAccounting_Setup.exe
