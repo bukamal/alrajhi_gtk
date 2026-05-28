@@ -1,4 +1,4 @@
-name: Build Windows Executable
+name: Build Windows Executable and Installer
 
 on:
   push:
@@ -49,7 +49,21 @@ jobs:
           --collect-all cv2 `
           main_pyqt5.py
 
-    - name: Upload Portable App Folder
+    - name: Download Inno Setup (command-line)
+      run: |
+        curl -L -o is.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
+        start /wait is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+
+    - name: Build Installer using Inno Setup
+      run: iscc setup.iss
+
+    - name: Upload Installer (setup.exe)
+      uses: actions/upload-artifact@v4
+      with:
+        name: AlrajhiAccounting-Setup
+        path: Output/AlrajhiAccounting_Setup.exe
+
+    - name: Upload Portable App Folder (optional)
       uses: actions/upload-artifact@v4
       with:
         name: AlrajhiAccounting-Portable

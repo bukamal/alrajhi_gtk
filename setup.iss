@@ -1,26 +1,34 @@
-; Script for Inno Setup
-; Run with: iscc setup.iss
-
 [Setup]
+AppId={{B8D5A8E2-9F3C-4D2A-8E9F-1C3D5E7A9B2F}
 AppName=الراجحي للمحاسبة
-AppVersion=1.0
+AppVersion=1.0.0
+AppPublisher=Alrajhi
 DefaultDirName={pf}\AlrajhiAccounting
 DefaultGroupName=الراجحي للمحاسبة
-UninstallDisplayIcon={app}\AlrajhiAccounting.exe
-Compression=lzma2
-SolidCompression=yes
-OutputDir=output
+OutputDir=Output
 OutputBaseFilename=AlrajhiAccounting_Setup
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+UninstallDisplayIcon={app}\alrajhi_icon.ico
 PrivilegesRequired=admin
-SetupIconFile=alrajhi_icon.ico
+
+[Languages]
+Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "إنشاء أيقونة على سطح المكتب"; GroupDescription: "أيقونات إضافية:"; Flags: unchecked
 
 [Files]
-Source: "dist\AlrajhiAccounting\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+Source: "dist\AlrajhiAccounting\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\الراجحي للمحاسبة"; Filename: "{app}\AlrajhiAccounting.exe"
 Name: "{group}\إلغاء التثبيت"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\الراجحي للمحاسبة"; Filename: "{app}\AlrajhiAccounting.exe"
+Name: "{commondesktop}\الراجحي للمحاسبة"; Filename: "{app}\AlrajhiAccounting.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\AlrajhiAccounting.exe"; Description: "تشغيل التطبيق"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\AlrajhiAccounting.exe"; Description: "تشغيل التطبيق الآن"; Flags: postinstall nowait skipifsilent
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\data"
