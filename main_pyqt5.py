@@ -8,22 +8,18 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QVBoxLay
 from PyQt5.QtGui import QFont, QKeySequence, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings, QPoint, QSize, QTimer
 
-# ----- دالة لتحديد المسار الصحيح للملفات عند التشغيل كـ exe (PyInstaller) -----
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-# Termux X11 compatibility
 if os.environ.get('TERMUX_VERSION') or os.path.exists('/data/data/com.termux'):
     os.environ['QT_QPA_PLATFORM'] = 'xcb'
     os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk2'
     os.environ['QT_QPA_NO_NATIVE_DIALOGS'] = '1'
 
-# High DPI
 try:
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 except:
@@ -63,7 +59,6 @@ class MainWindow(QMainWindow):
         main_vlayout.setContentsMargins(0,0,0,0)
         main_vlayout.setSpacing(0)
 
-        # شريط العنوان المخصص
         self.title_bar = QFrame()
         self.title_bar.setObjectName("TitleBar")
         self.title_bar.setFixedHeight(40)
@@ -132,12 +127,10 @@ class MainWindow(QMainWindow):
 
         main_vlayout.addWidget(self.title_bar)
 
-        # الشريط العلوي
         from views_pyqt5.modern_topbar import ModernTopBar
         self.top_bar = ModernTopBar(self)
         main_vlayout.addWidget(self.top_bar)
 
-        # منطقة المحتوى
         self.stack = QStackedWidget()
         main_vlayout.addWidget(self.stack)
 
@@ -178,8 +171,7 @@ class MainWindow(QMainWindow):
         from views_pyqt5.vouchers import VouchersWidget
         from views_pyqt5.reports import ReportsWidget
         from views_pyqt5.settings import SettingsWidget
-        if is_admin():
-            from views_pyqt5.users import UsersWidget
+        from views_pyqt5.users import UsersWidget
         self.pages['dashboard'] = DashboardWidget(self)
         self.pages['items'] = ItemsWidget()
         self.pages['invoices'] = InvoicesWidget()
@@ -188,7 +180,7 @@ class MainWindow(QMainWindow):
         self.pages['categories'] = CategoriesUnitsWidget(None, 'category')
         self.pages['vouchers'] = VouchersWidget()
         self.pages['reports'] = ReportsWidget()
-        self.pages['settings'] = SettingsWidget()
+        self.pages['settings'] = SettingsWidget(main_window=self)
         if is_admin():
             self.pages['users'] = UsersWidget()
         for name, widget in self.pages.items():
@@ -274,13 +266,18 @@ def main():
     app.setFont(QFont("Tajawal", 10))
     app.setWindowIcon(QIcon(resource_path("alrajhi_icon.ico")))
 
-    # شاشة التحميل
     splash = ModernSplashScreen()
     splash.show()
-    splash.set_progress(10, "جاري تهيئة النظام...")
+    splash.set_progress(5, "جاري تهيئة النظام...")
     QApplication.processEvents()
 
-    # محاكاة التحميل
+    # التحقق من وجود قاعدة البيانات وإنشائها
+    splash.set_progress(15, "التحقق من قاعدة البيانات...")
+    from database import DB_PATH
+    if not os.path.exists(DB_PATH):
+        splash.set_progress(20, "إنشاء قاعدة البيانات...")
+    QApplication.processEvents()
+
     splash.set_progress(30, "التحقق من التفعيل...")
     activation_result = check_activation()
     QApplication.processEvents()
@@ -288,9 +285,8 @@ def main():
     splash.set_progress(50, "تجهيز البيانات...")
     QApplication.processEvents()
 
-    # إذا لم يكن مفعلاً، نعرض شاشة التفعيل
     if not activation_result or (isinstance(activation_result, dict) and not activation_result.get('valid')):
-        splash.set_progress(70, "التفعيل مطلوب...")
+        splash.set_progress(60, "التفعيل مطلوب...")
         QApplication.processEvents()
         from activation_dialog_pyqt5 import ActivationDialog
         dialog = ActivationDialog()
@@ -300,6 +296,12 @@ def main():
         splash.show()
         splash.set_progress(80, "تم التفعيل، جاري المتابعة...")
         QApplication.processEvents()
+    else:
+        splash.set_progress(70, "الترخيص ساري...")
+        QApplication.processEvents()
+
+    splash.set_progress(85, "تحميل الإعدادات...")
+    QApplication.processEvents()
 
     splash.set_progress(90, "تسجيل الدخول...")
     QApplication.processEvents()
@@ -309,14 +311,16 @@ def main():
     if login.exec() != QDialog.Accepted:
         sys.exit(0)
 
-    # بعد تسجيل الدخول، نعرض شاشة ترحيب
+    splash.show()
+    splash.set_progress(95, "مرحباً بك...")
+    QApplication.processEvents()
+
     user_data = get_current_user()
     if user_data:
         summary = db.get_summary()
         welcome = WelcomeScreen(user_data, summary)
         welcome.exec()
 
-    # النافذة الرئيسية
     window = MainWindow()
     window.show()
     splash.finish_splash(window)

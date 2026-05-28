@@ -1,33 +1,11 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QLabel, QComboBox)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
+from PyQt5.QtCore import Qt
 from database import db
 from auth import get_all_users, register_user, delete_user, change_password, is_admin
 from utils_pyqt5 import show_toast
-
-class UsersTableModel(QAbstractTableModel):
-    def __init__(self, data, headers):
-        super().__init__()
-        self._data = data
-        self._headers = headers
-    def rowCount(self, parent=QModelIndex()): return len(self._data)
-    def columnCount(self, parent=QModelIndex()): return len(self._headers)
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid(): return None
-        if role == Qt.DisplayRole:
-            return str(self._data[index.row()][index.column()])
-        if role == Qt.TextAlignmentRole:
-            return Qt.AlignCenter
-        return None
-    def headerData(self, section, orientation, role):
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return self._headers[section]
-        return None
-    def update_data(self, new_data):
-        self.beginResetModel()
-        self._data = new_data
-        self.endResetModel()
+from views_pyqt5.base_table_model import BaseTableModel
 
 class UsersWidget(QWidget):
     def __init__(self, parent=None):
@@ -58,7 +36,6 @@ class UsersWidget(QWidget):
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self.edit_user)
-        # لا نربط الإشارة هنا (النموذج لم يُنشأ بعد)
         self.layout.addWidget(self.table)
         self.refresh()
 
@@ -68,12 +45,11 @@ class UsersWidget(QWidget):
         for u in users:
             data.append([u['id'], u['username'], u.get('full_name',''), 'مدير' if u['role']=='admin' else 'مستخدم', u.get('created_at',''), u.get('last_login','')])
         headers = ["#", "اسم المستخدم", "الاسم الكامل", "الصلاحية", "تاريخ التسجيل", "آخر دخول"]
-        self.model = UsersTableModel(data, headers)
+        self.model = BaseTableModel(data, headers)
         self.table.setModel(self.model)
         self.table.setColumnHidden(0, True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.delete_btn.setEnabled(False)
-        # ربط الإشارة بعد تعيين النموذج
         self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
     def on_selection_changed(self, selected, deselected):

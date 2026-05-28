@@ -1,53 +1,14 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
-                             QHeaderView, QMessageBox, QDialog, QLabel, QListWidget)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
+                             QHeaderView, QMessageBox, QDialog, QLabel, QListWidget, QComboBox, QDateEdit)
+from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtGui import QColor, QBrush
 from database import db
 from utils_pyqt5 import format_currency, show_toast
 from views_pyqt5.invoice_dialog import InvoiceDialog
+from views_pyqt5.base_table_model import BaseTableModel
+from views_pyqt5.modern_table import ModernTableView
 import traceback
-
-class InvoicesTableModel(QAbstractTableModel):
-    def __init__(self, data, headers):
-        super().__init__()
-        self._data = data if data is not None else []
-        self._headers = headers if headers is not None else []
-
-    def rowCount(self, parent=QModelIndex()):
-        return len(self._data)
-
-    def columnCount(self, parent=QModelIndex()):
-        return len(self._headers)
-
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
-            return None
-        if role == Qt.DisplayRole:
-            try:
-                row = index.row()
-                col = index.column()
-                if 0 <= row < len(self._data) and 0 <= col < len(self._data[row]):
-                    value = self._data[row][col]
-                    return str(value) if value is not None else ""
-            except Exception:
-                return ""
-        if role == Qt.TextAlignmentRole:
-            return Qt.AlignCenter
-        return None
-
-    def headerData(self, section, orientation, role):
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            try:
-                if 0 <= section < len(self._headers):
-                    return self._headers[section]
-            except Exception:
-                return ""
-        return None
-
-    def update_data(self, new_data):
-        self.beginResetModel()
-        self._data = new_data if new_data is not None else []
-        self.endResetModel()
 
 class InvoicesWidget(QWidget):
     def __init__(self, parent=None):
@@ -60,6 +21,7 @@ class InvoicesWidget(QWidget):
         layout.setSpacing(6)
         layout.setContentsMargins(6,6,6,6)
 
+        # شريط الأزرار العلوي
         btn_layout = QHBoxLayout()
         self.sale_btn = QPushButton("💰 فاتورة بيع جديدة")
         self.sale_btn.setObjectName("primary")
@@ -73,17 +35,62 @@ class InvoicesWidget(QWidget):
         self.delete_btn.setEnabled(False)
         self.delete_btn.clicked.connect(self.delete_selected_invoice)
 
+        self.refresh_btn = QPushButton("🔄 تحديث")
+        self.refresh_btn.setObjectName("secondary")
+        self.refresh_btn.clicked.connect(self.refresh)
+
+        # أزرار التصدير
+        self.export_excel_btn = QPushButton("📊 تصدير Excel")
+        self.export_excel_btn.clicked.connect(self.export_to_excel)
+        self.export_pdf_btn = QPushButton("📄 طباعة القائمة")
+        self.export_pdf_btn.clicked.connect(self.print_list)
+
         btn_layout.addWidget(self.sale_btn)
         btn_layout.addWidget(self.purchase_btn)
         btn_layout.addWidget(self.delete_btn)
+        btn_layout.addWidget(self.refresh_btn)
+        btn_layout.addWidget(self.export_excel_btn)
+        btn_layout.addWidget(self.export_pdf_btn)
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
+        # شريط الفلاتر
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("النوع:"))
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("الكل", "")
+        self.type_combo.addItem("بيع", "sale")
+        self.type_combo.addItem("شراء", "purchase")
+        self.type_combo.currentIndexChanged.connect(self.refresh)
+
+        filter_layout.addWidget(QLabel("من تاريخ:"))
+        self.start_date = QDateEdit()
+        self.start_date.setDate(QDate.currentDate().addDays(-30))
+        self.start_date.setCalendarPopup(True)
+        self.start_date.dateChanged.connect(self.refresh)
+
+        filter_layout.addWidget(QLabel("إلى تاريخ:"))
+        self.end_date = QDateEdit()
+        self.end_date.setDate(QDate.currentDate())
+        self.end_date.setCalendarPopup(True)
+        self.end_date.dateChanged.connect(self.refresh)
+
+        filter_layout.addWidget(QLabel("عميل/مورد:"))
+        self.customer_supplier_combo = QComboBox()
+        self.customer_supplier_combo.addItem("الكل", None)
+        filter_layout.addWidget(self.customer_supplier_combo)
+
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+
+        # شريط البحث
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("بحث عن فاتورة...")
         self.search_edit.textChanged.connect(self.refresh)
         layout.addWidget(self.search_edit)
 
-        self.table = QTableView()
+        # الجدول (استخدام ModernTableView لدعم التصدير)
+        self.table = ModernTableView()
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self.view_invoice)
@@ -92,29 +99,72 @@ class InvoicesWidget(QWidget):
     def refresh(self):
         try:
             search = self.search_edit.text().strip().lower()
-            invoices = db.get_invoices()
-            if not invoices:
-                invoices = []
-            if search:
-                invoices = [i for i in invoices if search in (i.get('reference','')+i.get('customer_name','')+i.get('supplier_name','')).lower()]
+            inv_type = self.type_combo.currentData()
+            start_date = self.start_date.date().toString("yyyy-MM-dd")
+            end_date = self.end_date.date().toString("yyyy-MM-dd")
+            entity_id = self.customer_supplier_combo.currentData()
+
+            # تعبئة قائمة العملاء/الموردين
+            if self.customer_supplier_combo.count() == 1:
+                customers = db.get_customers()
+                suppliers = db.get_suppliers()
+                for c in customers:
+                    self.customer_supplier_combo.addItem(f"عميل: {c['name']}", ('customer', c['id']))
+                for s in suppliers:
+                    self.customer_supplier_combo.addItem(f"مورد: {s['name']}", ('supplier', s['id']))
+
+            # استخدام دالة الفلترة المحسنة إذا كانت موجودة
+            if hasattr(db, 'get_invoices_filtered'):
+                invoices = db.get_invoices_filtered(
+                    search=search if search else None,
+                    inv_type=inv_type if inv_type else None,
+                    start_date=start_date,
+                    end_date=end_date,
+                    customer_id=entity_id[1] if entity_id and entity_id[0]=='customer' else None,
+                    supplier_id=entity_id[1] if entity_id and entity_id[0]=='supplier' else None
+                )
+            else:
+                # الرجوع إلى الطريقة القديمة
+                invoices = db.get_invoices()
+                if search:
+                    invoices = [i for i in invoices if search in (i.get('reference','')+i.get('customer_name','')+i.get('supplier_name','')).lower()]
+                if inv_type:
+                    invoices = [i for i in invoices if i.get('type') == inv_type]
+                invoices = [i for i in invoices if start_date <= i.get('date', '') <= end_date]
+                if entity_id:
+                    if entity_id[0] == 'customer':
+                        invoices = [i for i in invoices if i.get('customer_id') == entity_id[1]]
+                    else:
+                        invoices = [i for i in invoices if i.get('supplier_id') == entity_id[1]]
+
             data = []
+            self.row_colors = []
             for inv in invoices:
                 typ = "بيع" if inv.get('type') == 'sale' else "شراء"
+                total = inv.get('total', 0)
+                paid = inv.get('paid', 0)
+                remaining = total - paid
                 data.append([
                     inv.get('id', ''),
                     typ,
                     inv.get('reference', ''),
                     inv.get('date', ''),
-                    format_currency(inv.get('total', 0)),
-                    format_currency(inv.get('total', 0) - inv.get('paid', 0))
+                    format_currency(total),
+                    format_currency(remaining)
                 ])
+                self.row_colors.append(remaining > 0)
             headers = ["#", "النوع", "المرجع", "التاريخ", "الإجمالي", "المتبقي"]
-            self.model = InvoicesTableModel(data, headers)
+            self.model = BaseTableModel(data, headers)
             self.table.setModel(self.model)
             self.table.setColumnHidden(0, True)
             self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             self.delete_btn.setEnabled(False)
             self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+
+            # تلوين الصفوف غير المسددة
+            for row in range(self.model.rowCount()):
+                if self.row_colors[row]:
+                    self.model.set_row_background(row, QColor(255, 240, 240))
         except Exception as e:
             show_toast(f"خطأ في تحديث الفواتير: {str(e)}", "error", self)
 
@@ -210,3 +260,15 @@ class InvoicesWidget(QWidget):
         except Exception as e:
             error_details = traceback.format_exc()
             show_toast(f"خطأ في عرض التفاصيل: {str(e)}\n{error_details[:200]}", "error", self)
+
+    def export_to_excel(self):
+        if hasattr(self.table, 'export_to_excel'):
+            self.table.export_to_excel()
+        else:
+            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)
+
+    def print_list(self):
+        if hasattr(self.table, 'print_table'):
+            self.table.print_table()
+        else:
+            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)

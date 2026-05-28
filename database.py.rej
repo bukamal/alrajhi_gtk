@@ -1,0 +1,16 @@
+--- database.py
++++ database.py
+@@ -625,8 +632,12 @@
+                         (data['total'] - data.get('paid_amount', 0), data['supplier_id'], get_current_user_id()))
+             if data.get('paid_amount', 0) > 0:
+                 cur.execute("UPDATE users SET cash_balance = cash_balance + ? WHERE id=?",
+-                            (data['paid_amount'] if data['type'] == 'sale' else -data['paid_amount'], get_current_user_id()))
++                            (data['paid_amount'] if data['type'] == 'sale' else -data['paid_amount'], get_current_user_id()))
++                # طباعة للتصحيح (يمكن إزالتها لاحقاً)
++                print(f"[DEBUG] تحديث cash_balance: نوع={data['type']}, paid={data['paid_amount']}, user={get_current_user_id()}")
+             conn.commit()
++            print(f"[DEBUG] تم إنشاء الفاتورة {invoice_id} بنجاح")
+             return invoice_id
+         except Exception as e:
+             conn.rollback()
++            print(f"[ERROR] فشل إنشاء الفاتورة: {e}")

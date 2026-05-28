@@ -3,14 +3,8 @@ from PyQt5.QtWidgets import QMessageBox
 from datetime import datetime
 
 def format_currency(amount, settings=None):
-    from config import get_currency_settings
-    s = settings or get_currency_settings()
-    symbol = s.get('symbol', '$')
-    try:
-        formatted = f"{amount:,.{s.get('decimals',2)}f}"
-    except:
-        formatted = str(amount)
-    return f"{formatted} {symbol}"
+    from config import format_currency_with_settings
+    return format_currency_with_settings(amount, settings)
 
 def format_number(amount, decimals=2):
     try:

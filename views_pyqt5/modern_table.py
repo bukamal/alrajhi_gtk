@@ -83,7 +83,7 @@ class ModernTableView(QTableView):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "تقرير"
-        headers = [model.headerData(i, Qt.Horizontal) for i in range(model.columnCount())]
+        headers = [model.headerData(i, Qt.Horizontal, Qt.DisplayRole) for i in range(model.columnCount())]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
             cell.font = Font(bold=True)
@@ -92,7 +92,7 @@ class ModernTableView(QTableView):
         for row in range(model.rowCount()):
             for col in range(model.columnCount()):
                 idx = model.index(row, col)
-                value = model.data(idx)
+                value = model.data(idx, Qt.DisplayRole)
                 ws.cell(row=row+2, column=col+1, value=value)
         wb.save(filename)
         QMessageBox.information(self, "نجاح", f"تم تصدير البيانات إلى {filename}")
@@ -106,17 +106,17 @@ class ModernTableView(QTableView):
         html = "<html><head><meta charset='UTF-8'></head><body><table border='1' cellpadding='5' style='border-collapse:collapse;'>"
         html += "<thead><tr>"
         for col in range(model.columnCount()):
-            header = model.headerData(col, Qt.Horizontal)
+            header = model.headerData(col, Qt.Horizontal, Qt.DisplayRole)
             html += f"<th>{header}</th>"
         html += "</thead><tbody>"
         for row in range(model.rowCount()):
             html += "<tr>"
             for col in range(model.columnCount()):
                 idx = model.index(row, col)
-                value = model.data(idx)
+                value = model.data(idx, Qt.DisplayRole)
                 html += f"<td>{value}</td>"
             html += "</tr>"
-        html += "</tbody></table></body></html>"
+        html += "</tbody><td></body></html>"
         doc = QTextDocument()
         doc.setHtml(html)
         printer = QPrinter(QPrinter.HighResolution)

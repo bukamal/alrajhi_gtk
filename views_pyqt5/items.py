@@ -1,61 +1,47 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QComboBox, QDoubleSpinBox,
-                             QLabel, QGroupBox, QListWidget)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
-from PyQt5.QtGui import QColor
-from database import db
+                             QLabel, QGroupBox, QListWidget, QApplication, QMenu, QAction, QFileDialog)
+from PyQt5.QtCore import Qt, QPoint, QTimer
+from PyQt5.QtGui import QColor, QClipboard, QPixmap
+from database import db, Session
 from utils_pyqt5 import format_currency, show_toast
-from config import get_currency_settings
+from config import get_currency_settings, get_current_currency_symbol
+from views_pyqt5.base_table_model import BaseTableModel
+from views_pyqt5.centered_dialog import CenteredDialog
+from views_pyqt5.modern_table import ModernTableView
+import uuid
+import barcode
+from barcode.writer import ImageWriter
+import tempfile
+import os
 
-class ItemsTableModel(QAbstractTableModel):
-    def __init__(self, data, headers):
-        super().__init__()
-        self._data = data
-        self._headers = headers
+try:
+    from PyQt5.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
+    from PyQt5.QtGui import QImage, QPainter
+    PRINT_AVAILABLE = True
+except:
+    PRINT_AVAILABLE = False
 
-    def rowCount(self, parent=QModelIndex()): return len(self._data)
-    def columnCount(self, parent=QModelIndex()): return len(self._headers)
-
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid(): return None
-        if role == Qt.DisplayRole:
-            try:
-                row = index.row()
-                col = index.column()
-                if 0 <= row < len(self._data) and 0 <= col < len(self._data[row]):
-                    value = self._data[row][col]
-                    return str(value) if value is not None else ""
-            except Exception:
-                return ""
-        if role == Qt.TextAlignmentRole:
-            return Qt.AlignCenter
+class ItemsTableModel(BaseTableModel):
+    def custom_data(self, index, role):
         if role == Qt.ForegroundRole and index.column() == 2:
             try:
                 qty = self._data[index.row()][2]
-                if isinstance(qty, (int, float)) and qty <= 0:
-                    return QColor(239, 68, 68)
-                elif isinstance(qty, (int, float)) and qty < 5:
-                    return QColor(249, 115, 22)
+                if isinstance(qty, (int, float)):
+                    if qty <= 0:
+                        return QColor(239, 68, 68)
+                    elif qty < 5:
+                        return QColor(249, 115, 22)
             except:
                 pass
         return None
-
-    def headerData(self, section, orientation, role):
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            if 0 <= section < len(self._headers):
-                return self._headers[section]
-        return None
-
-    def update_data(self, new_data):
-        self.beginResetModel()
-        self._data = new_data if new_data is not None else []
-        self.endResetModel()
 
 class ItemsWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_item_id = None
+        self.current_item_name = None
         self.init_ui()
         self.refresh()
 
@@ -70,6 +56,20 @@ class ItemsWidget(QWidget):
         self.search_edit.textChanged.connect(self.refresh)
         top.addWidget(self.search_edit)
 
+        self.category_filter = QComboBox()
+        self.category_filter.addItem("جميع التصنيفات", None)
+        top.addWidget(QLabel("التصنيف:"))
+        top.addWidget(self.category_filter)
+
+        self.type_filter = QComboBox()
+        self.type_filter.addItem("جميع الأنواع", None)
+        self.type_filter.addItem("مخزون", "مخزون")
+        self.type_filter.addItem("منتج نهائي", "منتج نهائي")
+        self.type_filter.addItem("خدمة", "خدمة")
+        self.type_filter.currentIndexChanged.connect(self.refresh)
+        top.addWidget(QLabel("النوع:"))
+        top.addWidget(self.type_filter)
+
         self.add_btn = QPushButton("➕ إضافة مادة")
         self.add_btn.setObjectName("primary")
         self.add_btn.clicked.connect(self.add_item)
@@ -81,88 +81,375 @@ class ItemsWidget(QWidget):
         self.delete_btn.clicked.connect(self.delete_selected)
         top.addWidget(self.delete_btn)
 
+        self.movement_btn = QPushButton("📊 كشف حركة")
+        self.movement_btn.setEnabled(False)
+        self.movement_btn.clicked.connect(self.show_movement)
+        top.addWidget(self.movement_btn)
+
+        self.quick_edit_btn = QPushButton("⚡ تعديل سريع")
+        self.quick_edit_btn.setEnabled(False)
+        self.quick_edit_btn.clicked.connect(self.quick_edit)
+        top.addWidget(self.quick_edit_btn)
+
+        self.print_barcode_btn = QPushButton("🖨️ طباعة باركود")
+        self.print_barcode_btn.setEnabled(False)
+        self.print_barcode_btn.clicked.connect(self.print_barcode)
+        top.addWidget(self.print_barcode_btn)
+
+        self.refresh_btn = QPushButton("🔄 تحديث")
+        self.refresh_btn.clicked.connect(self.refresh)
+        top.addWidget(self.refresh_btn)
+
+        self.export_excel_btn = QPushButton("📊 Excel")
+        self.export_excel_btn.clicked.connect(self.export_to_excel)
+        top.addWidget(self.export_excel_btn)
+
+        self.print_btn = QPushButton("🖨️ طباعة القائمة")
+        self.print_btn.clicked.connect(self.print_list)
+        top.addWidget(self.print_btn)
+
         layout.addLayout(top)
 
-        self.table = QTableView()
+        self.table = ModernTableView()
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.doubleClicked.connect(self.edit_item)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         layout.addWidget(self.table)
 
+        self.status_label = QLabel()
+        layout.addWidget(self.status_label)
+
+        self.load_categories()
+        self.category_filter.currentIndexChanged.connect(self.refresh)
+        self.refresh()
+
+    def load_categories(self):
+        categories = db.get_categories()
+        self.category_filter.clear()
+        self.category_filter.addItem("جميع التصنيفات", None)
+        for c in categories:
+            self.category_filter.addItem(c['name'], c['id'])
+
     def refresh(self):
-        try:
-            search = self.search_edit.text().strip().lower()
-            items = db.get_items()
-            if not items:
-                items = []
-            if search:
-                items = [it for it in items if search in it.get('name', '').lower()]
-            settings = get_currency_settings()
-            data = []
-            for it in items:
-                data.append([
-                    it.get('id', ''),
-                    it.get('name', ''),
-                    it.get('available', 0),
-                    it.get('unit', ''),
-                    format_currency(it.get('selling_price', 0), settings),
-                    format_currency(it.get('total_value', 0), settings)
-                ])
-            headers = ["#", "الاسم", "الكمية", "الوحدة الأساسية", "سعر البيع", "قيمة المخزون"]
-            self.model = ItemsTableModel(data, headers)
-            self.table.setModel(self.model)
-            self.table.setColumnHidden(0, True)
-            self.table.resizeRowsToContents()
-            self.delete_btn.setEnabled(False)
+        search = self.search_edit.text().strip().lower() or None
+        category_id = self.category_filter.currentData()
+        item_type = self.type_filter.currentData()
+
+        items = db.get_items(search=search)
+        if items is None:
+            items = []
+
+        filtered = []
+        for it in items:
+            if category_id and it.get('category_id') != category_id:
+                continue
+            if item_type and it.get('item_type') != item_type:
+                continue
+            filtered.append(it)
+
+        settings = get_currency_settings()
+        data = []
+        for it in filtered:
+            data.append([
+                it.get('id', ''),
+                it.get('name', ''),
+                it.get('available', 0),
+                it.get('unit', ''),
+                format_currency(it.get('selling_price', 0), settings),
+                format_currency(it.get('total_value', 0), settings),
+                it.get('barcode', '')
+            ])
+        headers = ["#", "الاسم", "الكمية", "الوحدة الأساسية", "سعر البيع", "قيمة المخزون", "الباركود"]
+        self.model = ItemsTableModel(data, headers)
+        self.table.setModel(self.model)
+        self.table.setColumnHidden(0, True)
+        self.table.setColumnHidden(6, True)
+        self.table.resizeRowsToContents()
+
+        for row, it in enumerate(filtered):
+            if it.get('item_units'):
+                subunits = ", ".join([f"{u['unit_name']} ({u['conversion_factor']})" for u in it['item_units']])
+                self.table.model().setData(self.table.model().index(row, 3), subunits, Qt.ToolTipRole)
+
+        if self.table.selectionModel():
+            try:
+                self.table.selectionModel().selectionChanged.disconnect()
+            except:
+                pass
             self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        except Exception as e:
-            show_toast(f"خطأ في تحديث المواد: {str(e)}", "error", self)
+
+        self.delete_btn.setEnabled(False)
+        self.movement_btn.setEnabled(False)
+        self.quick_edit_btn.setEnabled(False)
+        self.print_barcode_btn.setEnabled(False)
+        self.current_item_id = None
+        self.current_item_name = None
+        self.status_label.setText(f"إجمالي السجلات: {len(filtered)}")
 
     def on_selection_changed(self, selected, deselected):
-        self.delete_btn.setEnabled(len(self.table.selectionModel().selectedRows()) > 0)
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            row = rows[0].row()
+            self.current_item_id = self.model._data[row][0]
+            self.current_item_name = self.model._data[row][1]
+            self.delete_btn.setEnabled(True)
+            self.movement_btn.setEnabled(True)
+            self.quick_edit_btn.setEnabled(True)
+            # تمكين طباعة الباركود فقط إذا كان للمادة باركود
+            barcode = self.model._data[row][6]
+            self.print_barcode_btn.setEnabled(bool(barcode))
+        else:
+            self.current_item_id = None
+            self.current_item_name = None
+            self.delete_btn.setEnabled(False)
+            self.movement_btn.setEnabled(False)
+            self.quick_edit_btn.setEnabled(False)
+            self.print_barcode_btn.setEnabled(False)
+
+    def show_context_menu(self, pos: QPoint):
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        row = index.row()
+        col = index.column()
+        if col in (1, 4, 6):
+            menu = QMenu()
+            copy_action = QAction("نسخ", self)
+            copy_action.triggered.connect(lambda: self.copy_to_clipboard(row, col))
+            menu.addAction(copy_action)
+            menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def copy_to_clipboard(self, row, col):
+        value = self.model._data[row][col]
+        clipboard = QApplication.clipboard()
+        clipboard.setText(str(value))
+        show_toast("تم النسخ إلى الحافظة", "success", self)
 
     def add_item(self):
         self.current_item_id = None
         self.open_item_dialog()
 
     def edit_item(self, index):
-        try:
-            row = index.row()
-            if row < 0 or not hasattr(self, 'model') or row >= len(self.model._data):
-                return
-            self.current_item_id = self.model._data[row][0]
-            self.open_item_dialog(is_edit=True)
-        except Exception as e:
-            show_toast(f"خطأ: {str(e)}", "error", self)
+        row = index.row()
+        if row < 0 or not hasattr(self, 'model') or row >= len(self.model._data):
+            return
+        self.current_item_id = self.model._data[row][0]
+        self.open_item_dialog(is_edit=True)
 
     def delete_selected(self):
-        selection = self.table.selectionModel().selectedRows()
-        if not selection:
+        if not self.current_item_id:
             return
-        row = selection[0].row()
-        item_id = self.model._data[row][0]
         reply = QMessageBox.question(self, "تأكيد الحذف", "هل تريد حذف هذه المادة؟", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
-                db.delete_item(item_id)
+                db.delete_item(self.current_item_id)
                 show_toast("تم الحذف", "success", self)
                 self.refresh()
             except Exception as e:
                 show_toast(str(e), "error", self)
 
-    def edit_item_by_id(self, item_id):
-        self.current_item_id = item_id
-        self.open_item_dialog(is_edit=True)
+    def show_movement(self):
+        if not self.current_item_id:
+            return
+        dialog = CenteredDialog(self)
+        dialog.setWindowTitle(f"كشف حركة المادة - {self.current_item_name}")
+        dialog.resize(700, 500)
+        layout = QVBoxLayout(dialog)
 
-    def open_item_dialog(self, is_edit=False):
-        dialog = QDialog(self)
+        cur = db.connect().cursor()
+        cur.execute("""
+            SELECT movement_type, quantity, unit_cost, movement_date, reference_id
+            FROM inventory_movements
+            WHERE item_id = ? AND user_id = ?
+            ORDER BY movement_date DESC
+        """, (self.current_item_id, Session.get_current_user_id()))
+        rows = cur.fetchall()
+        if not rows:
+            label = QLabel("لا توجد حركات لهذه المادة")
+            label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(label)
+        else:
+            html = f"""
+            <div style="text-align: center;">
+                <h3>كشف حركة المادة: {self.current_item_name}</h3>
+                <hr>
+            </div>
+            <table style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr style="background-color:#34495e; color:white;">
+                        <th>التاريخ</th><th>نوع الحركة</th><th>الكمية</th><th>سعر الوحدة</th><th>المرجع</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for r in rows:
+                movement_type = "شراء" if r['movement_type'] == 'purchase' else "بيع" if r['movement_type'] == 'sale' else "تعديل"
+                qty = float(r['quantity'])
+                unit_cost = float(r['unit_cost']) if r['unit_cost'] else 0
+                ref = r['reference_id'] or '-'
+                html += f"""
+                    <tr style="border-bottom:1px solid #ddd;">
+                        <td style="padding:8px;">{r['movement_date']}浏
+                        <td style="padding:8px;">{movement_type}浏
+                        <td style="padding:8px;">{qty}浏
+                        <td style="padding:8px;">{format_currency(unit_cost)}浏
+                        <td style="padding:8px;">{ref}浏
+                    </tr>
+                """
+            html += "</tbody></table>"
+            text_edit = QLabel(html)
+            text_edit.setWordWrap(True)
+            text_edit.setTextFormat(Qt.RichText)
+            layout.addWidget(text_edit)
+
+        close_btn = QPushButton("إغلاق")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        dialog.exec()
+
+    def quick_edit(self):
+        if not self.current_item_id:
+            return
+        items = db.get_items()
+        item = next((i for i in items if i['id'] == self.current_item_id), None)
+        if not item:
+            show_toast("لم يتم العثور على المادة", "error", self)
+            return
+
+        dialog = CenteredDialog(self)
+        dialog.setWindowTitle(f"تعديل سريع - {self.current_item_name}")
+        dialog.resize(350, 200)
+        layout = QFormLayout(dialog)
+
+        selling_spin = QDoubleSpinBox()
+        selling_spin.setRange(0, 999999)
+        selling_spin.setDecimals(2)
+        selling_spin.setValue(item.get('selling_price', 0))
+        layout.addRow("سعر البيع الجديد:", selling_spin)
+
+        qty_spin = QDoubleSpinBox()
+        qty_spin.setRange(0, 999999)
+        qty_spin.setDecimals(2)
+        qty_spin.setValue(item.get('quantity', 0))
+        layout.addRow("الكمية الجديدة:", qty_spin)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("حفظ")
+        cancel_btn = QPushButton("إلغاء")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addRow(btn_layout)
+
+        def on_save():
+            new_price = selling_spin.value()
+            new_qty = qty_spin.value()
+            try:
+                update_data = {
+                    'name': item['name'],
+                    'category_id': item.get('category_id'),
+                    'item_type': item.get('item_type', 'مخزون'),
+                    'purchase_price': item.get('purchase_price', 0),
+                    'selling_price': new_price,
+                    'quantity': new_qty,
+                    'unit': item.get('unit', ''),
+                    'average_cost': item.get('average_cost', 0),
+                    'barcode': item.get('barcode')
+                }
+                db.update_item(self.current_item_id, update_data)
+                show_toast("تم التحديث بنجاح", "success", self)
+                dialog.accept()
+                self.refresh()
+            except Exception as e:
+                show_toast(str(e), "error", self)
+
+        save_btn.clicked.connect(on_save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def print_barcode(self):
+        """طباعة باركود المادة المحددة"""
+        if not self.current_item_id:
+            show_toast("لم يتم تحديد مادة", "error", self)
+            return
+        
+        # جلب المادة للتأكد من وجود باركود
+        items = db.get_items()
+        item = next((i for i in items if i['id'] == self.current_item_id), None)
+        if not item:
+            show_toast("المادة غير موجودة", "error", self)
+            return
+        
+        barcode_text = item.get('barcode')
+        if not barcode_text:
+            show_toast("هذه المادة ليس لها باركود", "error", self)
+            return
+        
+        try:
+            # توليد صورة الباركود باستخدام python-barcode
+            # نستخدم EAN-13 أو Code128 (نختار Code128 لأنه يدعم أي أرقام/حروف)
+            # ولكن EAN-13 يتطلب 12 أو 13 رقماً فقط. لضمان التوافق، نستخدم Code128
+            code128 = barcode.get_barcode_class('code128')
+            barcode_obj = code128(barcode_text, writer=ImageWriter())
+            
+            # حفظ مؤقت
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                filename = tmp.name
+            barcode_obj.save(filename)
+            
+            # طباعة الصورة باستخدام QPrinter (معاينة قبل الطباعة)
+            if PRINT_AVAILABLE:
+                printer = QPrinter(QPrinter.HighResolution)
+                preview = QPrintPreviewDialog(printer, self)
+                preview.paintRequested.connect(lambda p: self._print_barcode_image(p, filename, item['name']))
+                preview.exec()
+            else:
+                # بديل: حفظ الصورة وفتحها
+                save_path, _ = QFileDialog.getSaveFileName(self, "حفظ الباركود", f"barcode_{item['name']}.png", "PNG (*.png)")
+                if save_path:
+                    import shutil
+                    shutil.copy(filename, save_path)
+                    show_toast(f"تم حفظ الباركود إلى {save_path}", "success", self)
+            
+            # حذف الملف المؤقت بعد فترة
+            QTimer.singleShot(5000, lambda: os.unlink(filename) if os.path.exists(filename) else None)
+            
+        except Exception as e:
+            show_toast(f"خطأ في إنشاء الباركود: {str(e)}", "error", self)
+
+    def _print_barcode_image(self, printer, image_path, item_name):
+        """طباعة الصورة على الطابعة"""
+        try:
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                return
+            # قياس الصفحة ومركزة الصورة
+            page_rect = printer.pageRect()
+            scaled_pixmap = pixmap.scaled(page_rect.width() * 0.6, page_rect.height() * 0.3, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            x = (page_rect.width() - scaled_pixmap.width()) / 2
+            y = (page_rect.height() - scaled_pixmap.height()) / 2
+            painter = QPainter(printer)
+            painter.drawPixmap(int(x), int(y), scaled_pixmap)
+            # إضافة اسم المادة تحت الباركود
+            painter.setFont(QFont("Tajawal", 12))
+            painter.drawText(page_rect, Qt.AlignCenter | Qt.AlignBottom, item_name)
+            painter.end()
+        except Exception as e:
+            show_toast(f"خطأ في الطباعة: {str(e)}", "error", self)
+
+    def open_item_dialog(self, is_edit=False, dialog_parent=None):
+        if dialog_parent is None:
+            dialog_parent = self
+        dialog = CenteredDialog(dialog_parent)
         dialog.setWindowTitle("تعديل مادة" if is_edit else "إضافة مادة جديدة")
-        dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
-        dialog.resize(600, 550)
+        dialog.resize(620, 600)
         main_layout = QVBoxLayout(dialog)
+
+        currency_symbol = get_current_currency_symbol()
 
         form_widget = QWidget()
         form_layout = QFormLayout(form_widget)
@@ -171,6 +458,16 @@ class ItemsWidget(QWidget):
 
         name_edit = QLineEdit()
         form_layout.addRow("اسم المادة:", name_edit)
+
+        barcode_layout = QHBoxLayout()
+        self.barcode_edit = QLineEdit()
+        self.barcode_edit.setPlaceholderText("رمز الباركود (اختياري)")
+        generate_barcode_btn = QPushButton("إنشاء عشوائي")
+        generate_barcode_btn.setFixedWidth(100)
+        generate_barcode_btn.clicked.connect(self.generate_barcode)
+        barcode_layout.addWidget(self.barcode_edit)
+        barcode_layout.addWidget(generate_barcode_btn)
+        form_layout.addRow("الباركود:", barcode_layout)
 
         cat_layout = QHBoxLayout()
         cat_combo = QComboBox()
@@ -195,16 +492,19 @@ class ItemsWidget(QWidget):
 
         purchase_spin = QDoubleSpinBox()
         purchase_spin.setRange(0, 999999)
-        purchase_spin.setPrefix("$ ")
+        purchase_spin.setDecimals(2)
+        purchase_spin.setPrefix(f"{currency_symbol} ")
         form_layout.addRow("سعر الشراء:", purchase_spin)
 
         selling_spin = QDoubleSpinBox()
         selling_spin.setRange(0, 999999)
-        selling_spin.setPrefix("$ ")
+        selling_spin.setDecimals(2)
+        selling_spin.setPrefix(f"{currency_symbol} ")
         form_layout.addRow("سعر البيع:", selling_spin)
 
         qty_spin = QDoubleSpinBox()
         qty_spin.setRange(0, 999999)
+        qty_spin.setDecimals(2)
         form_layout.addRow("الكمية الافتتاحية:", qty_spin)
 
         main_layout.addWidget(form_widget)
@@ -230,6 +530,7 @@ class ItemsWidget(QWidget):
             item_data = next((i for i in items if i.get('id') == self.current_item_id), None)
             if item_data:
                 name_edit.setText(item_data.get('name', ''))
+                self.barcode_edit.setText(item_data.get('barcode', ''))
                 idx = cat_combo.findData(item_data.get('category_id'))
                 if idx >= 0: cat_combo.setCurrentIndex(idx)
                 type_combo.setCurrentText(item_data.get('item_type', 'مخزون'))
@@ -254,9 +555,8 @@ class ItemsWidget(QWidget):
                 main_layout.addWidget(stats_label)
 
         def add_new_category():
-            cat_dialog = QDialog(dialog)
+            cat_dialog = CenteredDialog(dialog)
             cat_dialog.setWindowTitle("إضافة تصنيف جديد")
-            cat_dialog.setModal(True)
             cat_dialog.setLayoutDirection(Qt.RightToLeft)
             cat_dialog.resize(300, 120)
             cat_layout_form = QFormLayout(cat_dialog)
@@ -300,6 +600,7 @@ class ItemsWidget(QWidget):
             if not name:
                 show_toast("اسم المادة مطلوب", "error", dialog)
                 return
+            barcode = self.barcode_edit.text().strip() or None
             cat_id = cat_combo.currentData()
             item_type = type_combo.currentText()
             unit = unit_edit.text().strip()
@@ -309,6 +610,7 @@ class ItemsWidget(QWidget):
 
             data = {
                 'name': name,
+                'barcode': barcode,
                 'category_id': cat_id,
                 'item_type': item_type,
                 'purchase_price': purchase_price,
@@ -342,6 +644,7 @@ class ItemsWidget(QWidget):
                     show_toast("تمت الإضافة", "success", dialog)
                 dialog.accept()
                 self.refresh()
+                self.load_categories()
             except Exception as e:
                 show_toast(str(e), "error", dialog)
 
@@ -349,10 +652,14 @@ class ItemsWidget(QWidget):
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
 
+    def generate_barcode(self):
+        import uuid
+        new_barcode = str(uuid.uuid4().int)[:13]
+        self.barcode_edit.setText(new_barcode)
+
     def add_subunit_dialog(self, units_list, base_unit):
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle("إضافة وحدة فرعية")
-        dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
         dialog.resize(350, 180)
         layout = QFormLayout(dialog)
@@ -391,3 +698,15 @@ class ItemsWidget(QWidget):
         row = units_list.currentRow()
         if row >= 0:
             units_list.takeItem(row)
+
+    def export_to_excel(self):
+        if hasattr(self.table, 'export_to_excel'):
+            self.table.export_to_excel()
+        else:
+            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)
+
+    def print_list(self):
+        if hasattr(self.table, 'print_table'):
+            self.table.print_table()
+        else:
+            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)

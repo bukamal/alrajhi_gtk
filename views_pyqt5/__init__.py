@@ -3,7 +3,6 @@ from .items import ItemsWidget
 from .invoices import InvoicesWidget
 from .customers_suppliers import CustomersSuppliersWidget
 from .categories_units import CategoriesUnitsWidget
-from .expenses import ExpensesWidget
 from .vouchers import VouchersWidget
 from .reports import ReportsWidget
 from .settings import SettingsWidget

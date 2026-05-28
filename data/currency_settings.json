@@ -1,0 +1,7 @@
+{
+  "base_currency": "USD",
+  "display_currency": "USD",
+  "decimals": 2,
+  "symbol_position": "after",
+  "use_conversion": true
+}

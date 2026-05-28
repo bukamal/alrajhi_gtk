@@ -1,32 +1,11 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QLabel)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
+from PyQt5.QtCore import Qt
 from database import db
 from utils_pyqt5 import show_toast
-
-class CategoriesTableModel(QAbstractTableModel):
-    def __init__(self, data, headers):
-        super().__init__()
-        self._data = data
-        self._headers = headers
-    def rowCount(self, parent=QModelIndex()): return len(self._data)
-    def columnCount(self, parent=QModelIndex()): return len(self._headers)
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid(): return None
-        if role == Qt.DisplayRole:
-            return str(self._data[index.row()][index.column()])
-        if role == Qt.TextAlignmentRole:
-            return Qt.AlignCenter
-        return None
-    def headerData(self, section, orientation, role):
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return self._headers[section]
-        return None
-    def update_data(self, new_data):
-        self.beginResetModel()
-        self._data = new_data
-        self.endResetModel()
+from views_pyqt5.base_table_model import BaseTableModel
+from views_pyqt5.centered_dialog import CenteredDialog
 
 class CategoriesUnitsWidget(QWidget):
     def __init__(self, parent=None, entity_type='category'):
@@ -69,7 +48,7 @@ class CategoriesUnitsWidget(QWidget):
             items = [i for i in items if search in i['name'].lower()]
         data = [[i['id'], i['name']] for i in items]
         headers = ["#", "الاسم"]
-        self.model = CategoriesTableModel(data, headers)
+        self.model = BaseTableModel(data, headers)
         self.table.setModel(self.model)
         self.table.setColumnHidden(0, True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -103,9 +82,8 @@ class CategoriesUnitsWidget(QWidget):
                 show_toast(str(e), "error", self)
 
     def open_dialog(self, is_edit=False, iid=None):
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle(f"تعديل تصنيف" if is_edit else "إضافة تصنيف")
-        dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
         dialog.resize(320, 140)
         layout = QFormLayout(dialog)

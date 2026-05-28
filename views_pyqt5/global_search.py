@@ -3,8 +3,9 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QListWidget, QListW
 from PyQt5.QtCore import Qt, QTimer
 from database import db
 from utils_pyqt5 import format_currency
+from views_pyqt5.centered_dialog import CenteredDialog
 
-class GlobalSearchDialog(QDialog):
+class GlobalSearchDialog(CenteredDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
@@ -31,22 +32,15 @@ class GlobalSearchDialog(QDialog):
         self.results_list.clear()
         if len(text) < 2:
             return
-        # بحث في المواد
-        items = db.get_items()
+        items = db.get_items(search=text)
         for item in items:
-            if text in item['name'].lower():
-                self.add_result("مادة", item['name'], 'items', item['id'])
-        # بحث في العملاء
-        customers = db.get_customers()
+            self.add_result("مادة", item['name'], 'items', item['id'])
+        customers = db.get_customers(search=text)
         for c in customers:
-            if text in c['name'].lower() or text in c.get('phone','').lower():
-                self.add_result("عميل", c['name'], 'customers', c['id'])
-        # بحث في الموردين
-        suppliers = db.get_suppliers()
+            self.add_result("عميل", c['name'], 'customers', c['id'])
+        suppliers = db.get_suppliers(search=text)
         for s in suppliers:
-            if text in s['name'].lower() or text in s.get('phone','').lower():
-                self.add_result("مورد", s['name'], 'suppliers', s['id'])
-        # بحث في الفواتير
+            self.add_result("مورد", s['name'], 'suppliers', s['id'])
         invoices = db.get_invoices()
         for inv in invoices:
             if text in inv.get('reference','').lower() or text in inv.get('customer_name','').lower() or text in inv.get('supplier_name','').lower():

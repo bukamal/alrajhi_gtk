@@ -1,28 +1,53 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
                              QDoubleSpinBox, QDateEdit, QTextEdit, QGroupBox, QListWidget,
-                             QPushButton, QFormLayout, QMessageBox, QShortcut)
+                             QPushButton, QFormLayout, QMessageBox, QShortcut, QLineEdit, QApplication)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QKeySequence
 from database import db
 from utils_pyqt5 import format_currency, show_toast
+from config import get_currency_settings, get_current_currency_symbol
+from views_pyqt5.centered_dialog import CenteredDialog
 
-class InvoiceDialog(QDialog):
+# استيراد اختياري للماسح الضوئي
+try:
+    from views_pyqt5.barcode_scanner import BarcodeScanner
+    BARCODE_SCANNER_AVAILABLE = True
+except ImportError:
+    BARCODE_SCANNER_AVAILABLE = False
+
+class InvoiceDialog(CenteredDialog):
     def __init__(self, inv_type, parent=None):
         super().__init__(parent)
         self.inv_type = inv_type
         self.lines = []
         self.setWindowTitle(f"فاتورة {'بيع' if inv_type=='sale' else 'شراء'} جديدة")
-        self.setModal(True)
         self.setLayoutDirection(Qt.RightToLeft)
-        self.resize(800, 700)
+        self.resize(800, 750)
         self.init_ui()
         self.setup_shortcuts()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
+        currency_symbol = get_current_currency_symbol()
 
-        # اختيار العميل/المورد
+        # شريط الباركود السريع
+        barcode_layout = QHBoxLayout()
+        barcode_label = QLabel("باركود:")
+        self.barcode_input = QLineEdit()
+        self.barcode_input.setPlaceholderText("امسح الباركود أو اكتبه ثم اضغط Enter")
+        self.barcode_input.returnPressed.connect(self.add_item_by_barcode)
+        self.scan_btn = QPushButton("📷 مسح بالكاميرا")
+        if not BARCODE_SCANNER_AVAILABLE:
+            self.scan_btn.setEnabled(False)
+            self.scan_btn.setToolTip("مكتبات الكاميرا غير مثبتة")
+        else:
+            self.scan_btn.clicked.connect(self.scan_barcode)
+        barcode_layout.addWidget(barcode_label)
+        barcode_layout.addWidget(self.barcode_input)
+        barcode_layout.addWidget(self.scan_btn)
+        main_layout.addLayout(barcode_layout)
+
         if self.inv_type == 'sale':
             self.customers = db.get_customers()
             self.entity_combo = QComboBox()
@@ -38,10 +63,14 @@ class InvoiceDialog(QDialog):
                 self.entity_combo.addItem(f"{s['name']} (الرصيد: {format_currency(s['balance'])})", s['id'])
             entity_label = QLabel("المورد:")
 
+        self.balance_label = QLabel()
+        self.balance_label.setStyleSheet("color: #3b82f6; font-weight: bold; margin-top: 5px;")
+        self.balance_label.setVisible(False)
+
         main_layout.addWidget(entity_label)
         main_layout.addWidget(self.entity_combo)
+        main_layout.addWidget(self.balance_label)
 
-        # مجموعة بنود الفاتورة
         self.group = QGroupBox("بنود الفاتورة")
         group_layout = QVBoxLayout(self.group)
         self.lines_list = QListWidget()
@@ -54,7 +83,6 @@ class InvoiceDialog(QDialog):
         group_layout.addWidget(btn_remove_line)
         main_layout.addWidget(self.group)
 
-        # نموذج المعلومات الإضافية
         form = QFormLayout()
         self.date_edit = QDateEdit()
         self.date_edit.setDate(QDate.currentDate())
@@ -67,7 +95,8 @@ class InvoiceDialog(QDialog):
         form.addRow("ملاحظات:", self.notes_edit)
         self.paid_spin = QDoubleSpinBox()
         self.paid_spin.setRange(0, 999999)
-        self.paid_spin.setPrefix("$ ")
+        self.paid_spin.setDecimals(2)
+        self.paid_spin.setPrefix(f"{currency_symbol} ")
         form.addRow("المدفوع:", self.paid_spin)
         main_layout.addLayout(form)
 
@@ -87,6 +116,64 @@ class InvoiceDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.update_total()
 
+        self.entity_combo.currentIndexChanged.connect(self.update_balance_display)
+        self.update_balance_display()
+
+    def update_balance_display(self):
+        entity_id = self.entity_combo.currentData()
+        if not entity_id:
+            self.balance_label.setVisible(False)
+            return
+        if self.inv_type == 'sale':
+            customer = next((c for c in self.customers if c['id'] == entity_id), None)
+            if customer:
+                self.balance_label.setText(f"رصيد العميل الحالي: {format_currency(customer['balance'])}")
+                self.balance_label.setVisible(True)
+        else:
+            supplier = next((s for s in self.suppliers if s['id'] == entity_id), None)
+            if supplier:
+                self.balance_label.setText(f"رصيد المورد الحالي: {format_currency(supplier['balance'])}")
+                self.balance_label.setVisible(True)
+
+    def scan_barcode(self):
+        if not BARCODE_SCANNER_AVAILABLE:
+            show_toast("مكتبات الكاميرا غير مثبتة. لا يمكن المسح.", "error", self)
+            return
+        scanner = BarcodeScanner(self)
+        if scanner.exec():
+            barcode = scanner.get_barcode()
+            if barcode:
+                self.barcode_input.setText(barcode)
+                self.add_item_by_barcode()
+
+    def add_item_by_barcode(self):
+        barcode = self.barcode_input.text().strip()
+        if not barcode:
+            return
+        item = db.get_item_by_barcode(barcode)
+        if not item:
+            show_toast(f"لم يتم العثور على مادة بهذا الباركود: {barcode}", "error", self)
+            self.barcode_input.clear()
+            return
+        price = item.get('selling_price', 0) if self.inv_type == 'sale' else item.get('purchase_price', 0)
+        line_data = {
+            'item_id': item['id'],
+            'item_name': item['name'],
+            'quantity': 1,
+            'unit': item.get('unit', ''),
+            'conversion_factor': 1,
+            'base_qty': 1,
+            'unit_price': price,
+            'total': price
+        }
+        self.lines.append(line_data)
+        unit_display = f" ({line_data['unit']})" if line_data['unit'] else ""
+        currency_settings = get_currency_settings()
+        self.lines_list.addItem(f"{item['name']}{unit_display} - 1 × {format_currency(price, currency_settings)} = {format_currency(price, currency_settings)}")
+        self.update_total()
+        self.barcode_input.clear()
+        show_toast(f"تمت إضافة {item['name']}", "success", self)
+
     def setup_shortcuts(self):
         QShortcut(QKeySequence("F2"), self, self.on_save)
         QShortcut(QKeySequence("F3"), self, self.print_invoice)
@@ -94,32 +181,46 @@ class InvoiceDialog(QDialog):
         QShortcut(QKeySequence("F5"), self, self.refresh_items)
 
     def add_line(self):
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle("إضافة بند")
         dialog.setLayoutDirection(Qt.RightToLeft)
-        dialog.resize(450, 350)
+        dialog.resize(500, 420)
         layout = QFormLayout(dialog)
+        currency_symbol = get_current_currency_symbol()
+        currency_settings = get_currency_settings()
+
+        barcode_line = QHBoxLayout()
+        barcode_edit = QLineEdit()
+        barcode_edit.setPlaceholderText("امسح الباركود")
+        barcode_edit.returnPressed.connect(lambda: self.load_item_by_barcode(barcode_edit, item_combo, unit_combo, price_spin))
+        barcode_search_btn = QPushButton("🔍")
+        barcode_search_btn.clicked.connect(lambda: self.search_barcode_and_select(barcode_edit, item_combo, unit_combo, price_spin))
+        barcode_line.addWidget(barcode_edit)
+        barcode_line.addWidget(barcode_search_btn)
+        layout.addRow("الباركود:", barcode_line)
 
         items = db.get_items()
         item_combo = QComboBox()
         for it in items:
             price = it.get('selling_price',0) if self.inv_type=='sale' else it.get('purchase_price',0)
-            item_combo.addItem(f"{it['name']} ({format_currency(price)})", it['id'])
+            barcode_info = f" [باركود: {it['barcode']}]" if it.get('barcode') else ""
+            item_combo.addItem(f"{it['name']} ({format_currency(price, currency_settings)}){barcode_info}", it['id'])
         layout.addRow("المادة:", item_combo)
 
         qty_spin = QDoubleSpinBox()
         qty_spin.setRange(0.01, 999999)
+        qty_spin.setDecimals(2)
         qty_spin.setValue(1)
         layout.addRow("الكمية:", qty_spin)
 
-        # قائمة الوحدات (تتغير حسب المادة)
         unit_combo = QComboBox()
         unit_combo.addItem("الوحدة الأساسية", 1.0)
         layout.addRow("الوحدة:", unit_combo)
 
         price_spin = QDoubleSpinBox()
         price_spin.setRange(0.01, 999999)
-        price_spin.setPrefix("$ ")
+        price_spin.setDecimals(2)
+        price_spin.setPrefix(f"{currency_symbol} ")
         layout.addRow("السعر:", price_spin)
 
         def update_units():
@@ -129,7 +230,7 @@ class InvoiceDialog(QDialog):
             if item_id:
                 subunits = db.get_item_units(item_id)
                 for su in subunits:
-                    unit_combo.addItem(su['unit_name'], su['conversion_factor'])
+                    unit_combo.addItem(su['unit_name'], float(su['conversion_factor']))
             update_price()
 
         def update_price():
@@ -138,7 +239,7 @@ class InvoiceDialog(QDialog):
                 item = next((i for i in items if i['id']==item_id), None)
                 if item:
                     price = item.get('selling_price',0) if self.inv_type=='sale' else item.get('purchase_price',0)
-                    price_spin.setValue(price)
+                    price_spin.setValue(float(price))
 
         item_combo.currentIndexChanged.connect(update_units)
         update_units()
@@ -163,7 +264,7 @@ class InvoiceDialog(QDialog):
             unit_name = unit_combo.currentText()
             base_qty = qty * factor
             price = price_spin.value()
-            total = base_qty * price   # السعر دائماً للوحدة الأساسية
+            total = base_qty * price
             line_data = {
                 'item_id': item_id,
                 'item_name': item['name'],
@@ -176,13 +277,46 @@ class InvoiceDialog(QDialog):
             }
             self.lines.append(line_data)
             unit_display = f" ({line_data['unit']})" if line_data['unit'] else ""
-            self.lines_list.addItem(f"{item['name']}{unit_display} - {qty} × {format_currency(price)} = {format_currency(total)}")
+            self.lines_list.addItem(f"{item['name']}{unit_display} - {qty} × {format_currency(price, currency_settings)} = {format_currency(total, currency_settings)}")
             self.update_total()
             dialog.accept()
 
         add_btn.clicked.connect(on_add)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
+
+    def load_item_by_barcode(self, barcode_edit, item_combo, unit_combo, price_spin):
+        barcode = barcode_edit.text().strip()
+        if not barcode:
+            return
+        item = db.get_item_by_barcode(barcode)
+        if item:
+            idx = item_combo.findData(item['id'])
+            if idx >= 0:
+                item_combo.setCurrentIndex(idx)
+                self.update_units_for_combo(item_combo, unit_combo, price_spin)
+                show_toast("تم العثور على المادة", "success", self)
+            else:
+                show_toast("المادة غير موجودة في القائمة", "error", self)
+        else:
+            show_toast("لم يتم العثور على مادة بهذا الباركود", "error", self)
+
+    def search_barcode_and_select(self, barcode_edit, item_combo, unit_combo, price_spin):
+        self.load_item_by_barcode(barcode_edit, item_combo, unit_combo, price_spin)
+
+    def update_units_for_combo(self, item_combo, unit_combo, price_spin):
+        item_id = item_combo.currentData()
+        unit_combo.clear()
+        unit_combo.addItem("الوحدة الأساسية", 1.0)
+        if item_id:
+            subunits = db.get_item_units(item_id)
+            for su in subunits:
+                unit_combo.addItem(su['unit_name'], float(su['conversion_factor']))
+        items = db.get_items()
+        item = next((i for i in items if i['id'] == item_id), None)
+        if item:
+            price = item.get('selling_price',0) if self.inv_type=='sale' else item.get('purchase_price',0)
+            price_spin.setValue(float(price))
 
     def remove_selected_line(self):
         row = self.lines_list.currentRow()
@@ -209,6 +343,11 @@ class InvoiceDialog(QDialog):
         reference = self.ref_edit.toPlainText().strip()
         if not reference:
             reference = db.get_next_invoice_reference(self.inv_type)
+        else:
+            invoices = db.get_invoices()
+            if any(inv.get('reference') == reference for inv in invoices):
+                show_toast("المرجع موجود مسبقاً، يرجى استخدام مرجع آخر", "error", self)
+                return
         data = {
             'type': self.inv_type,
             'customer_id': entity_id if self.inv_type=='sale' else None,
@@ -230,30 +369,79 @@ class InvoiceDialog(QDialog):
     def print_invoice(self):
         from PyQt5.QtGui import QTextDocument
         from PyQt5.QtPrintSupport import QPrinter, QPrintPreviewDialog
-        html = f"""
-        <html dir="rtl">
-        <head><meta charset="UTF-8"><title>فاتورة</title></head>
-        <body style="font-family: 'Tajawal', sans-serif; padding:20px;">
-        <h2>الراجحي للمحاسبة</h2>
-        <p><strong>فاتورة {self.ref_edit.toPlainText() or 'جديدة'}</strong><br>
-        التاريخ: {self.date_edit.date().toString("yyyy-MM-dd")}<br>
-        {'العميل: ' + (self.entity_combo.currentText().split(' (')[0] if self.entity_combo.currentData() else 'نقدي') if self.inv_type=='sale' else 'المورد: ' + (self.entity_combo.currentText().split(' (')[0] if self.entity_combo.currentData() else 'نقدي')}</p>
-        <table border="1" cellpadding="5" style="border-collapse:collapse; width:100%;">
-        <thead><tr><th>المادة</th><th>الكمية</th><th>الوحدة</th><th>السعر</th><th>الإجمالي</th></tr></thead>
-        <tbody>
-        """
-        for line in self.lines:
-            html += f"<tr><td style='font-weight:bold'>{line['item_name']}</td><td>{line['quantity']}</td><td>{line.get('unit', '')}</td><td>{format_currency(line['unit_price'])}浏<td>{format_currency(line['total'])}浏</tr>"
-        total = sum(line['total'] for line in self.lines)
+        inv_ref = self.ref_edit.toPlainText() or "جديدة"
+        inv_date = self.date_edit.date().toString("yyyy-MM-dd")
+        entity_name = self.entity_combo.currentText().split(' (')[0] if self.entity_combo.currentData() else 'نقدي'
+        entity_label = 'العميل' if self.inv_type == 'sale' else 'المورد'
+        lines = self.lines
+        total = sum(line['total'] for line in lines)
         paid = self.paid_spin.value()
+        remaining = total - paid
+        notes = self.notes_edit.toPlainText().strip()
+
+        html = f"""
+        <!DOCTYPE html>
+        <html dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>فاتورة {inv_ref}</title>
+            <style>
+                body {{ font-family: 'Tajawal', 'Arial', sans-serif; padding: 20px; margin: 0; }}
+                .invoice-container {{ max-width: 800px; margin: auto; border: 1px solid #ddd; border-radius: 8px; padding: 20px; }}
+                .header {{ text-align: center; margin-bottom: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }}
+                .logo {{ font-size: 24px; font-weight: bold; color: #1e293b; }}
+                .title {{ font-size: 20px; font-weight: bold; margin: 10px 0; }}
+                .info {{ margin-bottom: 20px; }}
+                .info table {{ width: 100%; }}
+                .info td {{ padding: 5px; }}
+                table.items {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+                th {{ background-color: #3b82f6; color: white; }}
+                .totals {{ margin-top: 20px; text-align: left; }}
+                .totals table {{ width: 300px; margin-left: auto; }}
+                .footer {{ margin-top: 30px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #ddd; padding-top: 10px; }}
+                .notes {{ margin-top: 20px; padding: 10px; background-color: #f8fafc; border-radius: 5px; }}
+            </style>
+        </head>
+        <body>
+            <div class="invoice-container">
+                <div class="header">
+                    <div class="logo">نظام الراجحي للمحاسبة</div>
+                    <div class="title">فاتورة {inv_ref}</div>
+                </div>
+                <div class="info">
+                    <table>
+                        <tr><td style="font-weight:bold;">التاريخ:浏<td>{inv_date}浏
+                        <td style="font-weight:bold;">{entity_label}:浏<td>{entity_name}浏
+                    </table>
+                </div>
+                <table class="items">
+                    <thead><tr><th>المادة</th><th>الكمية</th><th>الوحدة</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+                    <tbody>
+        """
+        for line in lines:
+            html += f"<tr><td>{line['item_name']}浏<td>{line['quantity']}浏<td>{line.get('unit', '')}浏<td>{format_currency(line['unit_price'])}浏<td>{format_currency(line['total'])}浏</tr>"
         html += f"""
-        </tbody>
-        </table>
-        <p><strong>الإجمالي:</strong> {format_currency(total)}<br>
-        <strong>المدفوع:</strong> {format_currency(paid)}<br>
-        <strong>المتبقي:</strong> {format_currency(total-paid)}</p>
-        <p>شكراً للتعامل معنا</p>
-        </body></html>
+                    </tbody>
+                </table>
+                <div class="totals">
+                    <table>
+                        <tr><td style="font-weight:bold;">الإجمالي:浏<td>{format_currency(total)}浏
+                        <td style="font-weight:bold;">المدفوع:浏<td>{format_currency(paid)}浏
+                        <td style="font-weight:bold;">المتبقي:浏<td>{format_currency(remaining)}浏
+                    </table>
+                </div>
+        """
+        if notes:
+            html += f'<div class="notes"><strong>ملاحظات:</strong> {notes}</div>'
+        html += """
+                <div class="footer">
+                    شكراً للتعامل معنا<br>
+                    هذا المستند إلكتروني ولا يحتاج إلى توقيع
+                </div>
+            </div>
+        </body>
+        </html>
         """
         doc = QTextDocument()
         doc.setHtml(html)
@@ -264,9 +452,8 @@ class InvoiceDialog(QDialog):
 
     def add_customer_supplier(self):
         from views_pyqt5.customers_suppliers import CustomersSuppliersWidget
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle(f"إضافة {'عميل' if self.inv_type=='sale' else 'مورد'} جديد")
-        dialog.setModal(True)
         layout = QVBoxLayout(dialog)
         widget = CustomersSuppliersWidget(dialog, 'customer' if self.inv_type=='sale' else 'supplier')
         def on_close():
@@ -276,12 +463,14 @@ class InvoiceDialog(QDialog):
                 self.entity_combo.addItem("نقدي", None)
                 for c in self.customers:
                     self.entity_combo.addItem(f"{c['name']} (الرصيد: {format_currency(c['balance'])})", c['id'])
+                self.update_balance_display()
             else:
                 self.suppliers = db.get_suppliers()
                 self.entity_combo.clear()
                 self.entity_combo.addItem("نقدي", None)
                 for s in self.suppliers:
                     self.entity_combo.addItem(f"{s['name']} (الرصيد: {format_currency(s['balance'])})", s['id'])
+                self.update_balance_display()
             dialog.accept()
         widget.add_btn.clicked.disconnect()
         original_add = widget.add_entity
