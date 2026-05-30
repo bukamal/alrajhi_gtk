@@ -1,4 +1,4 @@
-name: Build Windows Executable (Console mode for debugging)
+name: Build Windows Installer (Console mode for debugging)
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
         $path = python -c "import PyQt5, os; print(os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms'))"
         echo "platforms_path=$path" >> $env:GITHUB_OUTPUT
 
-    - name: Build with PyInstaller (OneDir, CONSOLE mode for debugging)
+    - name: Build with PyInstaller (OneDir, CONSOLE enabled)
       run: |
         pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." `
           --collect-all pyzbar --collect-all PyQt5 `
@@ -41,8 +41,45 @@ jobs:
           --add-data "${{ steps.qtpath.outputs.platforms_path }};platforms" `
           --onedir --console --name AlrajhiAccounting_Debug main_pyqt5.py
 
-    - name: Upload artifact (Console version)
+    - name: Download Inno Setup
+      run: |
+        curl -L -o is.exe https://jrsoftware.org/download.php/is.exe
+        ./is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
+    - name: Create Installer Script
+      run: |
+        $setupScript = @'
+        [Setup]
+        AppName=الراجحي للمحاسبة (Debug)
+        AppVersion=1.0
+        DefaultDirName={pf}\AlrajhiAccountingDebug
+        DefaultGroupName=الراجحي للمحاسبة (Debug)
+        UninstallDisplayIcon={app}\AlrajhiAccounting_Debug.exe
+        Compression=lzma2
+        SolidCompression=yes
+        OutputDir=output
+        OutputBaseFilename=AlrajhiAccounting_Debug_Setup
+        WizardStyle=modern
+
+        [Files]
+        Source: "dist\AlrajhiAccounting_Debug\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+
+        [Icons]
+        Name: "{group}\الراجحي للمحاسبة (Debug)"; Filename: "{app}\AlrajhiAccounting_Debug.exe"
+        Name: "{group}\إلغاء التثبيت"; Filename: "{uninstallexe}"
+        Name: "{userdesktop}\الراجحي للمحاسبة (Debug)"; Filename: "{app}\AlrajhiAccounting_Debug.exe"
+
+        [Run]
+        Filename: "{app}\AlrajhiAccounting_Debug.exe"; Description: "تشغيل البرنامج (وضع التصحيح)"; Flags: postinstall nowait skipifsilent
+        '@
+        $setupScript | Out-File -FilePath setup.iss -Encoding utf8
+
+    - name: Build Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+
+    - name: Upload Installer
       uses: actions/upload-artifact@v4
       with:
-        name: AlrajhiAccounting_Debug
-        path: dist/AlrajhiAccounting_Debug
+        name: AlrajhiAccounting_Debug_Installer
+        path: output/AlrajhiAccounting_Debug_Setup.exe
