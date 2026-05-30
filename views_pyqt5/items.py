@@ -37,6 +37,7 @@ class ItemsWidget(BaseWidget):
         ("🖨️ طباعة باركود (متقدم)", "print_barcode_advanced", "btn_print_barcode"),
         ("📷 مسح مستمر", "open_continuous_scanner", "btn_continuous_scan"),
         ("🖨️ طباعة باركودات متعددة", "batch_print", "btn_batch_print"),
+        ("📄 اختبار باركود (ملف)", "test_barcode_from_file", "btn_test_barcode"),
     ]
 
     def __init__(self, parent=None):
@@ -153,7 +154,7 @@ class ItemsWidget(BaseWidget):
                 <thead>
                     <tr style="background-color:#34495e; color:white;">
                         <th>التاريخ</th><th>نوع الحركة</th><th>الكمية</th><th>سعر الوحدة</th><th>المرجع</th>
-                    </td>
+                    </tr>
                 </thead>
                 <tbody>
             """
@@ -171,7 +172,7 @@ class ItemsWidget(BaseWidget):
                         <td style="padding:8px;">{ref}浏
                     </tr>
                 """
-            html += "</tbody><table>"
+            html += "</tbody></table>"
             text_edit = QLabel(html)
             text_edit.setWordWrap(True)
             text_edit.setTextFormat(Qt.RichText)
@@ -730,3 +731,24 @@ class ItemsWidget(BaseWidget):
                 selected_items = [item]
         dialog = BatchPrintDialog(self, selected_items)
         dialog.exec()
+
+    # ========== اختبار الباركود من ملف ==========
+    
+    def test_barcode_from_file(self):
+        from PyQt5.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(self, "اختر صورة باركود", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+        if not file_path:
+            return
+        from PIL import Image
+        from pyzbar.pyzbar import decode
+        try:
+            img = Image.open(file_path)
+            decoded = decode(img)
+            if decoded:
+                barcode = decoded[0].data.decode('utf-8')
+                show_toast(f"✅ تم قراءة الباركود: {barcode}", "success", self)
+            else:
+                show_toast("❌ لم يتم العثور على باركود في الصورة", "error", self)
+        except Exception as e:
+            show_toast(f"خطأ: {str(e)}", "error", self)
+

@@ -428,10 +428,10 @@ class InvoiceDialog(CenteredDialog):
                 <div class="info">
                     <table>
                         <tr>
-                            <td style="font-weight:bold;">التاريخ:</td>
-                            <td>{inv_date}</td>
-                            <td style="font-weight:bold;">{entity_label}:</td>
-                            <td>{entity_name}</td>
+                            <td style="font-weight:bold;">التاريخ:浏
+                            <td>{inv_date}浏
+                            <td style="font-weight:bold;">{entity_label}:浏
+                            <td>{entity_name}浏
                         </tr>
                     </table>
                 </div>
@@ -444,25 +444,25 @@ class InvoiceDialog(CenteredDialog):
         for line in lines:
             html += f"""
                         <tr>
-                            <td style='padding:8px;'>{line['item_name']}</td>
-                            <td style='padding:8px;'>{line['quantity']}</td>
-                            <td style='padding:8px;'>{line.get('unit', '')}</td>
-                            <td style='padding:8px;'>{format_currency(line['unit_price'])}</td>
-                            <td style='padding:8px;'>{format_currency(line['total'])}</td>
+                            <td style='padding:8px;'>{line['item_name']}浏
+                            <td style='padding:8px;'>{line['quantity']}浏
+                            <td style='padding:8px;'>{line.get('unit', '')}浏
+                            <td style='padding:8px;'>{format_currency(line['unit_price'])}浏
+                            <td style='padding:8px;'>{format_currency(line['total'])}浏
                         </tr>
             """
         html += f"""
                     </tbody>
                 </table>
                 <div class="totals">
-                    <table>
+                    <tr>
                         <tr>
-                            <td style="font-weight:bold;">الإجمالي:</td>
-                            <td>{format_currency(total)}</td>
-                            <td style="font-weight:bold;">المدفوع:</td>
-                            <td>{format_currency(paid)}</td>
-                            <td style="font-weight:bold;">المتبقي:</td>
-                            <td>{format_currency(remaining)}</td>
+                            <td style="font-weight:bold;">الإجمالي:浏
+                            <td>{format_currency(total)}浏
+                            <td style="font-weight:bold;">المدفوع:浏
+                            <td>{format_currency(paid)}浏
+                            <td style="font-weight:bold;">المتبقي:浏
+                            <td>{format_currency(remaining)}浏
                         </tr>
                     </table>
                 </div>

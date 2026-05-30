@@ -6,6 +6,7 @@ import json
 from database.dao.base_dao import BaseDAO
 from database.session import UserSession
 from database.utils import storage_to_decimal, decimal_to_storage
+from database.connection import DatabaseConnection
 
 class ReportingDAO(BaseDAO):
     def _safe_sum(self, sql, params):
@@ -204,43 +205,49 @@ class ReportingDAO(BaseDAO):
         """, (uid, uid))
         return [{'month':row['month'], 'profit':storage_to_decimal(row['profit'] or '0')} for row in rows]
 
+    # ========== دوال التصدير والاستيراد (آمنة للخيوط) ==========
     def export_full_database(self) -> bytes:
+        conn = DatabaseConnection().get_connection()
+        cursor = conn.cursor()
         tables = ['customers','suppliers','categories','items','item_units','invoices','invoice_lines','vouchers','expenses','users','inventory_movements','exchange_rates']
         data = {}
         uid = UserSession.get_current_user_id()
         for tbl in tables:
             if tbl == 'item_units':
-                rows = self._fetch_all("""
+                cursor.execute("""
                     SELECT iu.* FROM item_units iu
                     JOIN items i ON iu.item_id = i.id
                     WHERE i.user_id = ?
                 """, (uid,))
             elif tbl in ('inventory_movements', 'exchange_rates'):
-                rows = self._fetch_all(f"SELECT * FROM {tbl}")
+                cursor.execute(f"SELECT * FROM {tbl}")
             else:
-                rows = self._fetch_all(f"SELECT * FROM {tbl} WHERE user_id=?", (uid,))
+                cursor.execute(f"SELECT * FROM {tbl} WHERE user_id=?", (uid,))
+            rows = cursor.fetchall()
             data[tbl] = [dict(row) for row in rows]
         return json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
 
     def import_full_database(self, json_bytes: bytes):
+        conn = DatabaseConnection().get_connection()
+        cursor = conn.cursor()
         data = json.loads(json_bytes.decode('utf-8'))
         self.begin_transaction()
         try:
             uid = UserSession.get_current_user_id()
             for tbl, rows in data.items():
                 if tbl == 'item_units':
-                    self._execute("DELETE FROM item_units WHERE item_id IN (SELECT id FROM items WHERE user_id=?)", (uid,))
+                    cursor.execute("DELETE FROM item_units WHERE item_id IN (SELECT id FROM items WHERE user_id=?)", (uid,))
                 elif tbl in ('inventory_movements', 'exchange_rates'):
-                    self._execute(f"DELETE FROM {tbl}")
+                    cursor.execute(f"DELETE FROM {tbl}")
                 else:
-                    self._execute(f"DELETE FROM {tbl} WHERE user_id=?", (uid,))
+                    cursor.execute(f"DELETE FROM {tbl} WHERE user_id=?", (uid,))
                 for row in rows:
                     if 'user_id' in row and tbl not in ('item_units','inventory_movements','exchange_rates'):
                         row['user_id'] = uid
                     cols = ', '.join(row.keys())
                     ph = ', '.join(['?' for _ in row])
-                    self._execute(f"INSERT INTO {tbl} ({cols}) VALUES ({ph})", list(row.values()))
-            self._commit()
+                    cursor.execute(f"INSERT INTO {tbl} ({cols}) VALUES ({ph})", list(row.values()))
+            conn.commit()
         except Exception as e:
-            self._rollback()
+            conn.rollback()
             raise e

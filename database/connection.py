@@ -1,5 +1,6 @@
 # database/connection.py
 import os
+import threading
 from typing import Optional
 from datetime import datetime
 import hashlib
@@ -12,7 +13,7 @@ try:
     print("✅ SQLCipher3 متاح، سيتم استخدام التشفير")
 except ImportError:
     import sqlite3
-    print("⚠️ sqlcipher3 غير مثبت، سيتم استخدام SQLite العادي (بدون تشفير)")
+    print("⚠️ sqlcipher3 غير مثبت، سيتم استخدام SQLite العادي")
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'alrajhi.db')
 
@@ -24,49 +25,47 @@ def _get_encryption_key() -> bytes:
 
 class DatabaseConnection:
     _instance = None
-    _conn: Optional[sqlite3.Connection] = None
+    _local = threading.local()
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._init_db()
         return cls._instance
 
-    def _init_db(self):
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        self._conn = sqlite3.connect(DB_PATH, isolation_level=None)
-        
+    def _init_db(self, conn):
         if SQLCIPHER_AVAILABLE:
             key = _get_encryption_key()
             try:
-                self._conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
-                self._conn.execute("SELECT count(*) FROM sqlite_master")
+                conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
+                conn.execute("SELECT count(*) FROM sqlite_master")
                 print("✅ فتح قاعدة البيانات المشفرة بنجاح")
             except sqlite3.DatabaseError as e:
                 print(f"⚠️ قاعدة البيانات غير مشفرة أو المفتاح خاطئ: {e}")
-                self._conn.close()
+                conn.close()
                 if os.path.exists(DB_PATH):
                     os.remove(DB_PATH)
-                self._conn = sqlite3.connect(DB_PATH, isolation_level=None)
-                self._conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
+                conn = sqlite3.connect(DB_PATH, isolation_level=None)
+                conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
                 print("✅ تم إنشاء قاعدة بيانات جديدة مشفرة")
-        else:
-            pass
-        
-        self._conn.row_factory = sqlite3.Row
-        self.init_tables()
-        self._run_migrations()
-        self._add_indexes()
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def get_connection(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._init_db()
-        return self._conn
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            self._local.conn = sqlite3.connect(DB_PATH, isolation_level=None)
+            self._local.conn = self._init_db(self._local.conn)
+            if not hasattr(self._local, '_initialized'):
+                self.init_tables()
+                self._run_migrations()
+                self._add_indexes()
+                self._local._initialized = True
+        return self._local.conn
 
     def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
 
     def execute(self, sql: str, params: tuple = ()):
         cur = self.get_connection().cursor()
@@ -112,7 +111,6 @@ class DatabaseConnection:
             "CREATE TABLE IF NOT EXISTS exchange_rates (currency_code TEXT PRIMARY KEY, rate_to_usd TEXT NOT NULL, updated_at TEXT);",
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, updated_at TEXT);"
         ]
-
         for sql in tables_sql:
             cursor.execute(sql)
             conn.commit()
@@ -171,12 +169,10 @@ class DatabaseConnection:
         if current >= CURRENT_VERSION:
             return
         print(f"بدء ترحيل قاعدة البيانات من الإصدار {current} إلى {CURRENT_VERSION}")
-
         if current < 1:
             self._migrate_to_version_1()
         if current < 2:
             self._migrate_to_version_2()
-
         self._set_schema_version(CURRENT_VERSION)
         print("تم ترحيل قاعدة البيانات بنجاح")
 
