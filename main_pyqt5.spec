@@ -1,11 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+import sys
+from PyInstaller.utils.hooks import collect_all
+
+# جمع بيانات ومكتبات pyzbar
+pyzbar_datas, pyzbar_binaries, pyzbar_hiddenimports = collect_all('pyzbar')
+
 a = Analysis(
     ['main_pyqt5.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=['decimal', 'sqlite3', 'cryptography', 'pyzbar.pyzbar', 'cv2'],
+    binaries=pyzbar_binaries + [
+        ('libiconv.dll', '.'),
+        ('libzbar-64.dll', '.'),
+    ],
+    datas=pyzbar_datas,
+    hiddenimports=['decimal', 'sqlite3', 'cryptography'] + pyzbar_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
