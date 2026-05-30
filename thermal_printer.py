@@ -7,11 +7,12 @@ from typing import Optional
 from PIL import Image
 from barcode import Code128
 from barcode.writer import ImageWriter
-from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
 from PyQt5.QtGui import QTextDocument
 from PyQt5.QtPrintSupport import QPrinter
 from label_designer import get_current_template
 from config import get_currency_symbol
+from utils_pyqt5 import show_toast
 
 try:
     import serial
@@ -140,29 +141,56 @@ class PDFPrinter:
         return base64.b64encode(buffer.getvalue()).decode()
     
     def print_label(self, barcode: str, item_name: str, price: str = "", copies: int = 1) -> bool:
-        filename, _ = QFileDialog.getSaveFileName(self.parent, "حفظ الباركود كـ PDF", f"barcode_{item_name}.pdf", "PDF (*.pdf)")
-        if not filename:
+        # التأكد من أن parent widget موجود وقابل للاستخدام
+        if self.parent is None:
+            print("خطأ: لا يوجد نافذة أبوية لفتح حوار الحفظ")
             return False
         
-        img_base64 = self._barcode_to_base64(barcode)
-        template = get_current_template()
-        currency = get_currency_symbol('USD')
-        price_label = "السعر:" if price else ""
+        # فتح حوار حفظ الملف
+        filename, selected_filter = QFileDialog.getSaveFileName(
+            self.parent,
+            "حفظ الباركود كـ PDF",
+            f"barcode_{item_name}.pdf",
+            "PDF Files (*.pdf)"
+        )
         
-        html = template.replace("{{company_name}}", "الراجحي للمحاسبة")
-        html = html.replace("{{item_name}}", item_name)
-        html = html.replace("{{barcode_image}}", img_base64)
-        html = html.replace("{{barcode}}", barcode)
-        html = html.replace("{{price_label}}", price_label)
-        html = html.replace("{{price}}", price)
+        if not filename:
+            print("تم إلغاء الحفظ من قبل المستخدم")
+            return False
         
-        doc = QTextDocument()
-        doc.setHtml(html)
-        printer = QPrinter()
-        printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFileName(filename)
-        doc.print(printer)
-        return True
+        try:
+            # تحديث واجهة المستخدم لإظهار أن العمل جارٍ
+            QApplication.processEvents()
+            
+            img_base64 = self._barcode_to_base64(barcode)
+            template = get_current_template()
+            currency = get_currency_symbol('USD')
+            price_label = "السعر:" if price else ""
+            
+            html = template.replace("{{company_name}}", "الراجحي للمحاسبة")
+            html = html.replace("{{item_name}}", item_name)
+            html = html.replace("{{barcode_image}}", img_base64)
+            html = html.replace("{{barcode}}", barcode)
+            html = html.replace("{{price_label}}", price_label)
+            html = html.replace("{{price}}", price)
+            
+            doc = QTextDocument()
+            doc.setHtml(html)
+            printer = QPrinter()
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(filename)
+            doc.print(printer)
+            
+            # عرض رسالة نجاح
+            if self.parent:
+                show_toast(f"تم حفظ PDF بنجاح: {os.path.basename(filename)}", "success", self.parent)
+            return True
+        except Exception as e:
+            error_msg = f"فشل حفظ PDF: {str(e)}"
+            print(error_msg)
+            if self.parent:
+                show_toast(error_msg, "error", self.parent)
+            return False
 
 # ========== ImagePrinter ==========
 class ImagePrinter:
@@ -170,9 +198,37 @@ class ImagePrinter:
         self.parent = parent_widget
     
     def print_label(self, barcode: str, item_name: str, price: str = "", copies: int = 1) -> bool:
-        filename, _ = QFileDialog.getSaveFileName(self.parent, "حفظ الباركود كـ PNG", f"barcode_{item_name}.png", "PNG (*.png)")
-        if not filename:
+        # التأكد من أن parent widget موجود وقابل للاستخدام
+        if self.parent is None:
+            print("خطأ: لا يوجد نافذة أبوية لفتح حوار الحفظ")
             return False
-        code128 = Code128(barcode, writer=ImageWriter())
-        code128.save(filename)
-        return True
+        
+        # فتح حوار حفظ الملف
+        filename, selected_filter = QFileDialog.getSaveFileName(
+            self.parent,
+            "حفظ الباركود كـ PNG",
+            f"barcode_{item_name}.png",
+            "PNG Files (*.png)"
+        )
+        
+        if not filename:
+            print("تم إلغاء الحفظ من قبل المستخدم")
+            return False
+        
+        try:
+            # تحديث واجهة المستخدم لإظهار أن العمل جارٍ
+            QApplication.processEvents()
+            
+            code128 = Code128(barcode, writer=ImageWriter())
+            code128.save(filename)
+            
+            # عرض رسالة نجاح
+            if self.parent:
+                show_toast(f"تم حفظ الصورة بنجاح: {os.path.basename(filename)}", "success", self.parent)
+            return True
+        except Exception as e:
+            error_msg = f"فشل حفظ الصورة: {str(e)}"
+            print(error_msg)
+            if self.parent:
+                show_toast(error_msg, "error", self.parent)
+            return False

@@ -212,6 +212,7 @@ class ReportingDAO(BaseDAO):
         tables = ['customers','suppliers','categories','items','item_units','invoices','invoice_lines','vouchers','expenses','users','inventory_movements','exchange_rates']
         data = {}
         uid = UserSession.get_current_user_id()
+        
         for tbl in tables:
             if tbl == 'item_units':
                 cursor.execute("""
@@ -219,10 +220,14 @@ class ReportingDAO(BaseDAO):
                     JOIN items i ON iu.item_id = i.id
                     WHERE i.user_id = ?
                 """, (uid,))
-            elif tbl in ('inventory_movements', 'exchange_rates'):
+            elif tbl == 'inventory_movements':
+                # جدول inventory_movements يحتوي على عمود user_id
+                cursor.execute(f"SELECT * FROM {tbl} WHERE user_id = ?", (uid,))
+            elif tbl == 'exchange_rates':
+                # جدول exchange_rates لا يحتوي على user_id (عمومي لجميع المستخدمين)
                 cursor.execute(f"SELECT * FROM {tbl}")
             else:
-                cursor.execute(f"SELECT * FROM {tbl} WHERE user_id=?", (uid,))
+                cursor.execute(f"SELECT * FROM {tbl} WHERE user_id = ?", (uid,))
             rows = cursor.fetchall()
             data[tbl] = [dict(row) for row in rows]
         return json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
@@ -235,14 +240,20 @@ class ReportingDAO(BaseDAO):
         try:
             uid = UserSession.get_current_user_id()
             for tbl, rows in data.items():
+                # حذف البيانات القديمة حسب الجدول
                 if tbl == 'item_units':
                     cursor.execute("DELETE FROM item_units WHERE item_id IN (SELECT id FROM items WHERE user_id=?)", (uid,))
-                elif tbl in ('inventory_movements', 'exchange_rates'):
-                    cursor.execute(f"DELETE FROM {tbl}")
+                elif tbl == 'exchange_rates':
+                    cursor.execute("DELETE FROM exchange_rates")
+                elif tbl == 'inventory_movements':
+                    cursor.execute("DELETE FROM inventory_movements WHERE user_id = ?", (uid,))
                 else:
-                    cursor.execute(f"DELETE FROM {tbl} WHERE user_id=?", (uid,))
+                    cursor.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (uid,))
+                
+                # إدراج البيانات الجديدة
                 for row in rows:
-                    if 'user_id' in row and tbl not in ('item_units','inventory_movements','exchange_rates'):
+                    # تعيين user_id للصفوف التي تحتاج إليه
+                    if 'user_id' in row and tbl not in ('exchange_rates',):
                         row['user_id'] = uid
                     cols = ', '.join(row.keys())
                     ph = ', '.join(['?' for _ in row])
