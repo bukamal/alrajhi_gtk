@@ -99,7 +99,7 @@ class ItemDAO(BaseDAO):
                         item.item_units.append(ItemUnit(
                             id=0, item_id=item.id,
                             unit_name=unit_name,
-                            conversion_factor=safe_decimal(factor)
+                            conversion_factor=storage_to_decimal(factor)
                         ))
             items.append(item)
         return items

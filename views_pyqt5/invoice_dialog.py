@@ -6,13 +6,13 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBo
                              QPushButton, QFormLayout, QMessageBox, QShortcut, QLineEdit, QApplication)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QKeySequence
+from decimal import Decimal
 from database import item_dao, customer_dao, supplier_dao, invoice_dao, exchange_rate_dao, reporting_dao
-from database.utils import storage_to_decimal
+from database.utils import storage_to_decimal, decimal_to_storage
 from utils_pyqt5 import format_currency, show_toast
 from config import get_currency_settings, get_current_currency_symbol
 from views_pyqt5.centered_dialog import CenteredDialog
 
-# لا نستورد BarcodeScanner هنا - سنقوم باستيراده عند الحاجة فقط
 BARCODE_SCANNER_AVAILABLE = None
 
 def _get_barcode_scanner():
@@ -173,12 +173,12 @@ class InvoiceDialog(CenteredDialog):
         line_data = {
             'item_id': item.id,
             'item_name': item.name,
-            'quantity': 1,
+            'quantity': Decimal('1'),
             'unit': item.unit,
-            'conversion_factor': 1,
-            'base_qty': 1,
-            'unit_price': float(price),
-            'total': float(price)
+            'conversion_factor': Decimal('1'),
+            'base_qty': Decimal('1'),
+            'unit_price': price,
+            'total': price
         }
         self.lines.append(line_data)
         unit_display = f" ({line_data['unit']})" if line_data['unit'] else ""
@@ -228,7 +228,7 @@ class InvoiceDialog(CenteredDialog):
         layout.addRow("الكمية:", qty_spin)
 
         unit_combo = QComboBox()
-        unit_combo.addItem("الوحدة الأساسية", 1.0)
+        unit_combo.addItem("الوحدة الأساسية", Decimal('1'))
         layout.addRow("الوحدة:", unit_combo)
 
         price_spin = QDoubleSpinBox()
@@ -240,11 +240,11 @@ class InvoiceDialog(CenteredDialog):
         def update_units():
             item_id = item_combo.currentData()
             unit_combo.clear()
-            unit_combo.addItem("الوحدة الأساسية", 1.0)
+            unit_combo.addItem("الوحدة الأساسية", Decimal('1'))
             if item_id:
                 subunits = item_dao.get_units(item_id)
                 for su in subunits:
-                    unit_combo.addItem(su.unit_name, float(su.conversion_factor))
+                    unit_combo.addItem(su.unit_name, su.conversion_factor)
             update_price()
 
         def update_price():
@@ -273,11 +273,13 @@ class InvoiceDialog(CenteredDialog):
             item = next((i for i in items if i.id == item_id), None)
             if not item:
                 return
-            qty = qty_spin.value()
+            qty = Decimal(str(qty_spin.value()))
             factor = unit_combo.currentData()
+            if not isinstance(factor, Decimal):
+                factor = Decimal(str(factor))
             unit_name = unit_combo.currentText()
             base_qty = qty * factor
-            price = price_spin.value()
+            price = Decimal(str(price_spin.value()))
             total = base_qty * price
             line_data = {
                 'item_id': item_id,
@@ -321,11 +323,11 @@ class InvoiceDialog(CenteredDialog):
     def update_units_for_combo(self, item_combo, unit_combo, price_spin):
         item_id = item_combo.currentData()
         unit_combo.clear()
-        unit_combo.addItem("الوحدة الأساسية", 1.0)
+        unit_combo.addItem("الوحدة الأساسية", Decimal('1'))
         if item_id:
             subunits = item_dao.get_units(item_id)
             for su in subunits:
-                unit_combo.addItem(su.unit_name, float(su.conversion_factor))
+                unit_combo.addItem(su.unit_name, su.conversion_factor)
         items = item_dao.get_items()
         item = next((i for i in items if i.id == item_id), None)
         if item:
@@ -343,14 +345,14 @@ class InvoiceDialog(CenteredDialog):
         total = sum(line['total'] for line in self.lines)
         self.total_label.setText(f"الإجمالي: {format_currency(total)}")
         if self.paid_spin.value() == 0:
-            self.paid_spin.setValue(total)
+            self.paid_spin.setValue(float(total))
 
     def on_save(self):
         if not self.lines:
             show_toast("أضف بنداً واحداً على الأقل", "error", self)
             return
         total = sum(line['total'] for line in self.lines)
-        paid = self.paid_spin.value()
+        paid = Decimal(str(self.paid_spin.value()))
         if paid > total:
             paid = total
         entity_id = self.entity_combo.currentData()
@@ -389,7 +391,7 @@ class InvoiceDialog(CenteredDialog):
         entity_label = 'العميل' if self.inv_type == 'sale' else 'المورد'
         lines = self.lines
         total = sum(line['total'] for line in lines)
-        paid = self.paid_spin.value()
+        paid = Decimal(str(self.paid_spin.value()))
         remaining = total - paid
         notes = self.notes_edit.toPlainText().strip()
 
@@ -426,10 +428,10 @@ class InvoiceDialog(CenteredDialog):
                 <div class="info">
                     <table>
                         <tr>
-                            <td style="font-weight:bold;">التاريخ:浏
-                            <td>{inv_date}浏
-                            <td style="font-weight:bold;">{entity_label}:浏
-                            <td>{entity_name}浏
+                            <td style="font-weight:bold;">التاريخ:</td>
+                            <td>{inv_date}</td>
+                            <td style="font-weight:bold;">{entity_label}:</td>
+                            <td>{entity_name}</td>
                         </tr>
                     </table>
                 </div>
@@ -442,11 +444,11 @@ class InvoiceDialog(CenteredDialog):
         for line in lines:
             html += f"""
                         <tr>
-                            <td style='padding:8px;'>{line['item_name']}浏
-                            <td style='padding:8px;'>{line['quantity']}浏
-                            <td style='padding:8px;'>{line.get('unit', '')}浏
-                            <td style='padding:8px;'>{format_currency(line['unit_price'])}浏
-                            <td style='padding:8px;'>{format_currency(line['total'])}浏
+                            <td style='padding:8px;'>{line['item_name']}</td>
+                            <td style='padding:8px;'>{line['quantity']}</td>
+                            <td style='padding:8px;'>{line.get('unit', '')}</td>
+                            <td style='padding:8px;'>{format_currency(line['unit_price'])}</td>
+                            <td style='padding:8px;'>{format_currency(line['total'])}</td>
                         </tr>
             """
         html += f"""
@@ -455,12 +457,12 @@ class InvoiceDialog(CenteredDialog):
                 <div class="totals">
                     <table>
                         <tr>
-                            <td style="font-weight:bold;">الإجمالي:浏
-                            <td>{format_currency(total)}浏
-                            <td style="font-weight:bold;">المدفوع:浏
-                            <td>{format_currency(paid)}浏
-                            <td style="font-weight:bold;">المتبقي:浏
-                            <td>{format_currency(remaining)}浏
+                            <td style="font-weight:bold;">الإجمالي:</td>
+                            <td>{format_currency(total)}</td>
+                            <td style="font-weight:bold;">المدفوع:</td>
+                            <td>{format_currency(paid)}</td>
+                            <td style="font-weight:bold;">المتبقي:</td>
+                            <td>{format_currency(remaining)}</td>
                         </tr>
                     </table>
                 </div>

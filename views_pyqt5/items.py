@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import QColor, QPixmap, QFont
 from PyQt5.QtPrintSupport import QPrinter, QPrintPreviewDialog
 from database import item_dao, category_dao, inventory_dao, exchange_rate_dao
-from database.utils import storage_to_decimal
+from database.utils import storage_to_decimal, decimal_to_storage
 from utils_pyqt5 import format_currency, show_toast
 from config import get_currency_settings, get_current_currency_symbol
 from views_pyqt5.base_table_model import BaseTableModel
@@ -19,6 +19,7 @@ from barcode.writer import ImageWriter
 import tempfile
 import os
 import shutil
+from decimal import Decimal
 
 PRINT_AVAILABLE = True
 
@@ -152,7 +153,7 @@ class ItemsWidget(BaseWidget):
                 <thead>
                     <tr style="background-color:#34495e; color:white;">
                         <th>التاريخ</th><th>نوع الحركة</th><th>الكمية</th><th>سعر الوحدة</th><th>المرجع</th>
-                    </tr>
+                    </td>
                 </thead>
                 <tbody>
             """
@@ -170,7 +171,7 @@ class ItemsWidget(BaseWidget):
                         <td style="padding:8px;">{ref}浏
                     </tr>
                 """
-            html += "</tbody><tr>"
+            html += "</tbody></table>"
             text_edit = QLabel(html)
             text_edit.setWordWrap(True)
             text_edit.setTextFormat(Qt.RichText)
@@ -217,8 +218,8 @@ class ItemsWidget(BaseWidget):
                 'category_id': item.category_id,
                 'item_type': item.item_type,
                 'purchase_price': item.purchase_price,
-                'selling_price': selling_spin.value(),
-                'quantity': qty_spin.value(),
+                'selling_price': Decimal(str(selling_spin.value())),
+                'quantity': Decimal(str(qty_spin.value())),
                 'unit': item.unit,
                 'average_cost': item.average_cost,
                 'barcode': item.barcode
@@ -437,7 +438,7 @@ class ItemsWidget(BaseWidget):
                 stats_details_label.setText(stats_text)
                 tabs.addTab(stats_tab, "📊 إحصائيات")
 
-        # دوال الوحدات الفرعية
+        # دوال الوحدات الفرعية (مصححة)
         def add_subunit_dialog():
             sub_dialog = CenteredDialog(dialog)
             sub_dialog.setWindowTitle("إضافة وحدة فرعية")
@@ -465,7 +466,8 @@ class ItemsWidget(BaseWidget):
                 if not unit_name:
                     show_toast("اسم الوحدة مطلوب", "error", sub_dialog)
                     return
-                factor = factor_spin.value()
+                # تحويل القيمة من float إلى Decimal لضمان التوافق
+                factor = Decimal(str(factor_spin.value()))
                 if factor <= 0:
                     show_toast("عامل التحويل يجب أن يكون أكبر من صفر", "error", sub_dialog)
                     return
@@ -538,9 +540,9 @@ class ItemsWidget(BaseWidget):
             cat_id = cat_combo.currentData()
             item_type = type_combo.currentText()
             unit = unit_edit.text().strip()
-            purchase_price = purchase_spin.value()
-            selling_price = selling_spin.value()
-            qty = qty_spin.value()
+            purchase_price = Decimal(str(purchase_spin.value()))
+            selling_price = Decimal(str(selling_spin.value()))
+            qty = Decimal(str(qty_spin.value()))
 
             data = {
                 'name': name,
@@ -562,7 +564,7 @@ class ItemsWidget(BaseWidget):
                         parts = item_text.split(' : ')
                         if len(parts) == 2:
                             unit_name = parts[0]
-                            factor = float(parts[1])
+                            factor = Decimal(parts[1])
                             item_dao.add_unit(item_id, unit_name, factor)
                     show_toast("تم التعديل", "success", dialog)
                 else:
@@ -572,7 +574,7 @@ class ItemsWidget(BaseWidget):
                         parts = item_text.split(' : ')
                         if len(parts) == 2:
                             unit_name = parts[0]
-                            factor = float(parts[1])
+                            factor = Decimal(parts[1])
                             item_dao.add_unit(new_id, unit_name, factor)
                     show_toast("تمت الإضافة", "success", dialog)
                 dialog.accept()
@@ -715,7 +717,6 @@ class ItemsWidget(BaseWidget):
     # ========== طباعة باركودات متعددة دفعة واحدة ==========
     
     def batch_print(self):
-        """طباعة باركودات متعددة دفعة واحدة"""
         from batch_print_dialog import BatchPrintDialog
         selected_items = []
         if self.current_id:
@@ -724,4 +725,3 @@ class ItemsWidget(BaseWidget):
                 selected_items = [item]
         dialog = BatchPrintDialog(self, selected_items)
         dialog.exec()
-
