@@ -352,13 +352,20 @@ def main():
         splash.set_progress(80, "تم التفعيل، جاري المتابعة...")
         QApplication.processEvents()
 
+    # التحقق من كلمة مرور المسؤول الافتراضية (مع إخفاء splash)
     db_conn = DatabaseConnection()
     if db_conn.check_default_admin_password():
         splash.set_progress(85, "كلمة المرور الافتراضية للمسؤول تحتاج إلى تغيير...")
         QApplication.processEvents()
+        # إخفاء splash قبل فتح الحوار
+        splash.hide()
         from views_pyqt5.change_password_dialog import ChangeAdminPasswordDialog
         dlg = ChangeAdminPasswordDialog()
+        # ضبط النافذة لتكون في المقدمة ووسط الشاشة
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
         dlg.exec()
+        # إعادة إظهار splash
+        splash.show()
 
     splash.set_progress(90, "تسجيل الدخول...")
     QApplication.processEvents()
@@ -372,10 +379,8 @@ def main():
     if Session.get_force_password_change():
         from views_pyqt5.change_password_dialog import ChangePasswordDialog
         dlg = ChangePasswordDialog(Session.get_current_user_id())
-        if dlg.exec():
-            Session.set_force_password_change(False)
-        else:
-            sys.exit(0)
+        dlg.exec()
+        Session.set_force_password_change(False)
 
     user_data = get_current_user()
     if user_data:

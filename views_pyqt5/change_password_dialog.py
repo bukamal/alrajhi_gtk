@@ -13,6 +13,8 @@ class ChangePasswordDialog(CenteredDialog):
         self.setModal(True)
         self.setLayoutDirection(Qt.RightToLeft)
         self.resize(400, 220)
+        # جعل النافذة تظهر دائماً في المقدمة
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         layout = QFormLayout(self)
 
         self.old_password_edit = QLineEdit()
@@ -36,6 +38,7 @@ class ChangePasswordDialog(CenteredDialog):
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
         layout.addRow(btn_layout)
+        self.raise_()  # رفع النافذة للأمام
 
     def on_save(self):
         old = self.old_password_edit.text()
@@ -61,6 +64,8 @@ class ChangeAdminPasswordDialog(CenteredDialog):
         self.setModal(True)
         self.setLayoutDirection(Qt.RightToLeft)
         self.resize(400, 200)
+        # جعل النافذة تظهر دائماً في المقدمة
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         layout = QFormLayout(self)
 
         self.new_password_edit = QLineEdit()
@@ -80,6 +85,7 @@ class ChangeAdminPasswordDialog(CenteredDialog):
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
         layout.addRow(btn_layout)
+        self.raise_()
 
     def on_save(self):
         new_pwd = self.new_password_edit.text()
