@@ -8,6 +8,7 @@ class ExportWorker(QThread):
 
     def run(self):
         try:
+            # لا توجد أي عمليات واجهة مستخدم هنا، فقط معالجة بيانات
             data = reporting_dao.export_full_database()
             self.finished.emit(data)
         except Exception as e:

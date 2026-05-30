@@ -4,7 +4,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton,
                              QGroupBox, QFileDialog, QMessageBox, QCheckBox, QComboBox, QLabel,
                              QHBoxLayout, QDoubleSpinBox, QTabWidget, QTableView, QHeaderView,
-                             QDialog, QDialogButtonBox, QSpinBox)
+                             QDialog, QDialogButtonBox, QSpinBox, QApplication)
 from PyQt5.QtCore import Qt, QSettings, QAbstractTableModel, QModelIndex
 from database import exchange_rate_dao, reporting_dao
 from database.connection import DatabaseConnection
@@ -105,7 +105,6 @@ class SettingsWidget(QWidget):
         printer_form.addRow("منفذ الطابعة:", self.printer_port)
         printer_form.addRow("عدد النسخ:", self.printer_copies)
 
-        # إضافة قائمة الطابعات المتاحة
         self.printer_combo = QComboBox()
         printer_form.addRow("الطابعة الافتراضية:", self.printer_combo)
 
@@ -337,14 +336,16 @@ class SettingsWidget(QWidget):
         show_toast("تم حفظ إعدادات النسخ الاحتياطي", "success", self)
 
     def export_db(self):
+        # إنشاء QFileDialog في الخيط الرئيسي
         filename, _ = QFileDialog.getSaveFileName(self, "حفظ النسخة الاحتياطية", "alrajhi_backup.json", "JSON (*.json)")
         if not filename:
             return
         self.export_btn.setEnabled(False)
         show_toast("جاري تصدير البيانات...", "info", self)
+        # تمرير اسم الملف فقط إلى العامل
         self.worker = ExportWorker()
         self.worker.finished.connect(lambda data: self._save_export_data(data, filename))
-        self.worker.error.connect(lambda msg: self._on_export_error(msg))
+        self.worker.error.connect(self._on_export_error)
         self.worker.start()
 
     def _save_export_data(self, data, filename):
