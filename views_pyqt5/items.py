@@ -171,7 +171,7 @@ class ItemsWidget(BaseWidget):
                         <td style="padding:8px;">{ref}浏
                     </tr>
                 """
-            html += "</tbody></table>"
+            html += "</tbody><table>"
             text_edit = QLabel(html)
             text_edit.setWordWrap(True)
             text_edit.setTextFormat(Qt.RichText)
@@ -288,7 +288,7 @@ class ItemsWidget(BaseWidget):
     def delete_item(self, item_id):
         item_dao.delete(item_id)
 
-    def open_dialog(self, is_edit=False, item_id=None, dialog_parent=None):
+    def open_dialog(self, is_edit=False, item_id=None, dialog_parent=None, prefill_barcode=None):
         parent_for_dialog = dialog_parent if dialog_parent else self
         dialog = CenteredDialog(parent_for_dialog)
         dialog.setWindowTitle("تعديل مادة" if is_edit else "إضافة مادة جديدة")
@@ -315,6 +315,8 @@ class ItemsWidget(BaseWidget):
         barcode_edit = QLineEdit()
         barcode_edit.setPlaceholderText("رمز الباركود (اختياري)")
         barcode_edit.setToolTip("يمكنك إدخال باركود يدوياً أو الضغط على زر 'إنشاء عشوائي' لتوليد رقم عشوائي")
+        if prefill_barcode:
+            barcode_edit.setText(prefill_barcode)
         generate_barcode_btn = QPushButton("إنشاء عشوائي")
         generate_barcode_btn.setFixedWidth(100)
         generate_barcode_btn.setToolTip("توليد رقم باركود عشوائي (13 رقم)")
@@ -466,7 +468,6 @@ class ItemsWidget(BaseWidget):
                 if not unit_name:
                     show_toast("اسم الوحدة مطلوب", "error", sub_dialog)
                     return
-                # تحويل القيمة من float إلى Decimal لضمان التوافق
                 factor = Decimal(str(factor_spin.value()))
                 if factor <= 0:
                     show_toast("عامل التحويل يجب أن يكون أكبر من صفر", "error", sub_dialog)
@@ -712,7 +713,11 @@ class ItemsWidget(BaseWidget):
                 QTimer.singleShot(100, add_item)
                 dialog.exec()
         else:
-            show_toast(f"لم يتم العثور على مادة بالباركود: {barcode}", "error", self)
+            reply = QMessageBox.question(self, "مادة غير موجودة", 
+                                         f"لم يتم العثور على مادة بالباركود: {barcode}\n\nهل تريد إضافة هذه المادة كمنتج جديد؟",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.open_dialog(is_edit=False, prefill_barcode=barcode)
 
     # ========== طباعة باركودات متعددة دفعة واحدة ==========
     
