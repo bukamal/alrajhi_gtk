@@ -1,11 +1,17 @@
+# views_pyqt5/users.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QLabel, QComboBox)
 from PyQt5.QtCore import Qt
-from database import db
+from database import user_dao, Session
+from database.connection import DatabaseConnection
 from auth import get_all_users, register_user, delete_user, change_password, is_admin
 from utils_pyqt5 import show_toast
 from views_pyqt5.base_table_model import BaseTableModel
+from views_pyqt5.modern_table import ModernTableView
+from views_pyqt5.centered_dialog import CenteredDialog, show_centered_messagebox
+
 
 class UsersWidget(QWidget):
     def __init__(self, parent=None):
@@ -30,13 +36,19 @@ class UsersWidget(QWidget):
         self.delete_btn.clicked.connect(self.delete_selected)
         top.addWidget(self.delete_btn)
 
+        self.refresh_btn = QPushButton("🔄 تحديث")
+        self.refresh_btn.clicked.connect(self.refresh)
+        top.addWidget(self.refresh_btn)
+
+        top.addStretch()
         self.layout.addLayout(top)
 
-        self.table = QTableView()
+        self.table = ModernTableView()
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self.edit_user)
         self.layout.addWidget(self.table)
+
         self.refresh()
 
     def refresh(self):
@@ -69,7 +81,7 @@ class UsersWidget(QWidget):
             return
         row = selection[0].row()
         uid = self.model._data[row][0]
-        reply = QMessageBox.question(self, "تأكيد الحذف", "هل تريد حذف هذا المستخدم؟ سيتم حذف جميع بياناته.", QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "تأكيد الحذف", "هل تريد حذف هذا المستخدم؟ سيتم حذف جميع بياناته.", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
                 if delete_user(uid):
@@ -81,12 +93,13 @@ class UsersWidget(QWidget):
                 show_toast(str(e), "error", self)
 
     def open_user_dialog(self, is_edit=False, uid=None):
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle("تعديل مستخدم" if is_edit else "إضافة مستخدم جديد")
         dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
         dialog.resize(380, 320)
         layout = QFormLayout(dialog)
+
         username_edit = QLineEdit()
         if is_edit:
             users = get_all_users()
@@ -95,15 +108,18 @@ class UsersWidget(QWidget):
                 username_edit.setText(user['username'])
                 username_edit.setEnabled(False)
         layout.addRow("اسم المستخدم:", username_edit)
+
         fullname_edit = QLineEdit()
         if is_edit and user:
             fullname_edit.setText(user.get('full_name',''))
         layout.addRow("الاسم الكامل:", fullname_edit)
+
         role_combo = QComboBox()
         role_combo.addItems(["مستخدم", "مدير"])
         if is_edit and user and user['role']=='admin':
             role_combo.setCurrentIndex(1)
         layout.addRow("الصلاحية:", role_combo)
+
         if not is_edit:
             password_edit = QLineEdit()
             password_edit.setEchoMode(QLineEdit.Password)
@@ -115,6 +131,7 @@ class UsersWidget(QWidget):
             change_pass_btn = QPushButton("تغيير كلمة المرور")
             change_pass_btn.clicked.connect(lambda: self.change_password_dialog(uid, dialog))
             layout.addRow(change_pass_btn)
+
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("حفظ")
         save_btn.setObjectName("primary")
@@ -122,16 +139,17 @@ class UsersWidget(QWidget):
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addRow(btn_layout)
+
         def on_save():
             if not is_edit:
                 username = username_edit.text().strip()
                 password = password_edit.text()
                 confirm = confirm_edit.text()
                 if not username or not password:
-                    show_toast("اسم المستخدم وكلمة المرور مطلوبان", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "اسم المستخدم وكلمة المرور مطلوبان", QMessageBox.Warning)
                     return
                 if password != confirm:
-                    show_toast("كلمة المرور غير متطابقة", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "كلمة المرور غير متطابقة", QMessageBox.Warning)
                     return
                 role = 'admin' if role_combo.currentText()=='مدير' else 'user'
                 full_name = fullname_edit.text().strip()
@@ -140,69 +158,76 @@ class UsersWidget(QWidget):
                     dialog.accept()
                     self.refresh()
                 else:
-                    show_toast("اسم المستخدم موجود مسبقاً", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "اسم المستخدم موجود مسبقاً", QMessageBox.Warning)
             else:
                 role = 'admin' if role_combo.currentText()=='مدير' else 'user'
                 full_name = fullname_edit.text().strip()
-                conn = db.connect()
+                conn = DatabaseConnection().get_connection()
                 cur = conn.cursor()
                 cur.execute("UPDATE users SET full_name = ?, role = ? WHERE id = ?", (full_name, role, uid))
                 conn.commit()
                 show_toast("تم التحديث", "success", dialog)
                 dialog.accept()
                 self.refresh()
+
         save_btn.clicked.connect(on_save)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
 
     def change_password_dialog(self, uid, parent_dialog):
-        from database import get_current_user_id
-        dialog = QDialog(parent_dialog)
+        from database import Session
+        dialog = CenteredDialog(parent_dialog)
         dialog.setWindowTitle("تغيير كلمة المرور")
         dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
         layout = QFormLayout(dialog)
-        current_user = get_current_user_id()
+
+        current_user = Session.get_current_user_id()
         if uid == current_user:
             old_edit = QLineEdit()
             old_edit.setEchoMode(QLineEdit.Password)
             layout.addRow("كلمة المرور الحالية:", old_edit)
+
         new_edit = QLineEdit()
         new_edit.setEchoMode(QLineEdit.Password)
         confirm_edit = QLineEdit()
         confirm_edit.setEchoMode(QLineEdit.Password)
         layout.addRow("كلمة المرور الجديدة:", new_edit)
         layout.addRow("تأكيد كلمة المرور:", confirm_edit)
+
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("تغيير")
         cancel_btn = QPushButton("إلغاء")
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addRow(btn_layout)
+
         def on_save():
             new = new_edit.text()
             confirm = confirm_edit.text()
             if not new or new != confirm:
-                show_toast("كلمة المرور غير متطابقة", "error", dialog)
+                show_centered_messagebox(dialog, "خطأ", "كلمة المرور غير متطابقة", QMessageBox.Warning)
                 return
             if uid == current_user:
                 old = old_edit.text()
                 if not old:
-                    show_toast("كلمة المرور الحالية مطلوبة", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "كلمة المرور الحالية مطلوبة", QMessageBox.Warning)
                     return
                 if change_password(uid, old, new):
                     show_toast("تم تغيير كلمة المرور", "success", dialog)
                     dialog.accept()
                 else:
-                    show_toast("كلمة المرور الحالية غير صحيحة", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "كلمة المرور الحالية غير صحيحة", QMessageBox.Warning)
             else:
-                from auth import hash_password
+                from database.utils import hash_password
                 new_hash = hash_password(new)
-                cur = db.connect().cursor()
+                conn = DatabaseConnection().get_connection()
+                cur = conn.cursor()
                 cur.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, uid))
-                db.connect().commit()
+                conn.commit()
                 show_toast("تم تغيير كلمة المرور", "success", dialog)
                 dialog.accept()
+
         save_btn.clicked.connect(on_save)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()

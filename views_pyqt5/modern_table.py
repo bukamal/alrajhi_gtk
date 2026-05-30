@@ -1,7 +1,10 @@
+# views_pyqt5/modern_table.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import QTableView, QHeaderView, QMenu, QAction, QFileDialog, QMessageBox, QApplication
 from PyQt5.QtCore import Qt, QModelIndex, QSortFilterProxyModel, pyqtSignal
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtGui import QKeySequence, QTextDocument
+from PyQt5.QtPrintSupport import QPrinter, QPrintPreviewDialog
 import sys
 
 class ModernTableView(QTableView):
@@ -98,8 +101,6 @@ class ModernTableView(QTableView):
         QMessageBox.information(self, "نجاح", f"تم تصدير البيانات إلى {filename}")
 
     def print_table(self):
-        from PyQt5.QtGui import QTextDocument, QTextCursor
-        from PyQt5.QtPrintSupport import QPrinter, QPrintPreviewDialog
         model = self.model()
         if not model:
             return
@@ -114,9 +115,9 @@ class ModernTableView(QTableView):
             for col in range(model.columnCount()):
                 idx = model.index(row, col)
                 value = model.data(idx, Qt.DisplayRole)
-                html += f"<td>{value}</td>"
+                html += f"<td style='padding:8px;'>{value}</td>"
             html += "</tr>"
-        html += "</tbody><td></body></html>"
+        html += "</tbody></table></body></html>"
         doc = QTextDocument()
         doc.setHtml(html)
         printer = QPrinter(QPrinter.HighResolution)

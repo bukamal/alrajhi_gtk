@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-from database import db, Session
+from database import user_dao, Session, get_current_user_id, get_current_user_role
+from database.utils import hash_password, verify_password
 from typing import Optional, Dict
 
 def login(username: str, password: str) -> bool:
-    return db.login(username, password)
+    return user_dao.login(username, password)
 
 def logout():
     Session.clear_current_user()
@@ -12,11 +13,15 @@ def get_current_user() -> Optional[Dict]:
     uid = Session.get_current_user_id()
     if not uid:
         return None
-    conn = db.connect()
-    cur = conn.cursor()
-    cur.execute("SELECT id, username, role, full_name FROM users WHERE id = ?", (uid,))
-    row = cur.fetchone()
-    return dict(row) if row else None
+    user = user_dao.get_current_user()
+    if user:
+        return {
+            'id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'full_name': user.full_name
+        }
+    return None
 
 def is_authenticated() -> bool:
     return Session.get_current_user_id() is not None
@@ -25,24 +30,25 @@ def is_admin() -> bool:
     return Session.get_current_user_role() == 'admin'
 
 def register_user(username: str, password: str, full_name: str = '', role: str = 'user') -> bool:
-    return db.register_user(username, password, full_name, role)
+    return user_dao.register(username, password, full_name, role)
 
 def delete_user(user_id: str) -> bool:
-    return db.delete_user(user_id)
+    return user_dao.delete(user_id)
 
 def get_all_users() -> list:
-    return db.get_users()
+    users = user_dao.get_all()
+    return [{
+        'id': u.id,
+        'username': u.username,
+        'role': u.role,
+        'full_name': u.full_name,
+        'created_at': u.created_at,
+        'last_login': u.last_login,
+        'cash_balance': u.cash_balance
+    } for u in users]
 
 def change_password(user_id: str, old_password: str, new_password: str) -> bool:
-    return db.change_password(user_id, old_password, new_password)
-
-def hash_password(password: str) -> str:
-    from database import hash_password as db_hash
-    return db_hash(password)
-
-def verify_password(password: str, hashed: str) -> bool:
-    from database import verify_password as db_verify
-    return db_verify(password, hashed)
+    return user_dao.change_password(user_id, old_password, new_password)
 
 # ========== نظام الصلاحيات المتقدم ==========
 PERMISSIONS = {

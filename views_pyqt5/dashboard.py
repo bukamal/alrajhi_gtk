@@ -1,16 +1,19 @@
+# views_pyqt5/dashboard.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QFrame, QMessageBox, QDialog, QApplication)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon
 import qtawesome as qta
-from database import db
+from database import reporting_dao, exchange_rate_dao, customer_dao, supplier_dao, item_dao, invoice_dao
 from utils_pyqt5 import format_currency, show_toast
 from config import get_currency_settings, refresh_currency_settings, currency_notifier
 from views_pyqt5.kpi_cards import KPICardsWidget
 from views_pyqt5.invoice_dialog import InvoiceDialog
 from views_pyqt5.items import ItemsWidget
 from views_pyqt5.centered_dialog import CenteredDialog
+from fetch_exchange_rates import fetch_and_update_rates
 
 class DashboardWidget(QWidget):
     def __init__(self, parent=None):
@@ -45,7 +48,7 @@ class DashboardWidget(QWidget):
         self.currency_combo.currentIndexChanged.connect(self.on_currency_selected)
 
     def load_currencies(self):
-        rates = db.get_all_exchange_rates()
+        rates = exchange_rate_dao.get_all()
         self.currency_combo.clear()
         current_display = get_currency_settings().get('display_currency', 'USD')
         current_index = 0
@@ -63,7 +66,7 @@ class DashboardWidget(QWidget):
         return get_currency_symbol(code)
 
     def update_exchange_rate_label(self, currency_code):
-        rate = db.get_exchange_rate(currency_code)
+        rate = exchange_rate_dao.get_rate(currency_code)
         if rate:
             usd_rate = 1.0 / float(rate) if rate != 0 else 0
             self.exchange_rate_label.setText(f"1 {currency_code} = {usd_rate:.4f} USD")
@@ -136,17 +139,23 @@ class DashboardWidget(QWidget):
             self.rates_grid.addWidget(label)
         rates_layout.addLayout(self.rates_grid)
 
-        refresh_btn = QPushButton("تحديث الأسعار")
+        refresh_btn = QPushButton("🔄 تحديث الأسعار")
         refresh_btn.setObjectName("secondary")
-        refresh_btn.clicked.connect(self.open_currency_settings)
+        refresh_btn.clicked.connect(self.refresh_exchange_rates)
         rates_layout.addWidget(refresh_btn, alignment=Qt.AlignLeft)
 
         self.main_layout.addWidget(rates_frame)
         self.update_rates_display()
 
+    def refresh_exchange_rates(self):
+        fetch_and_update_rates(self)
+        self.load_currencies()
+        self.update_rates_display()
+        self.refresh_kpis()
+
     def update_rates_display(self):
         for code, label in self.rate_labels.items():
-            rate_to_usd = db.get_exchange_rate(code)
+            rate_to_usd = exchange_rate_dao.get_rate(code)
             if rate_to_usd:
                 usd_rate = 1.0 / float(rate_to_usd) if rate_to_usd != 0 else 0
                 label.setText(f"{code}: {usd_rate:.4f}")
@@ -154,10 +163,8 @@ class DashboardWidget(QWidget):
                 label.setText(f"{code}: --")
 
     def quick_add_item(self):
-        # إنشاء كائن ItemsWidget مؤقت ولكن نمرر له الداشبورد كـ parent
-        # ثم نستدعي open_item_dialog مع تمرير الداشبورد كـ dialog_parent
         temp_widget = ItemsWidget(self)
-        temp_widget.open_item_dialog(is_edit=False, dialog_parent=self)
+        temp_widget.open_dialog(is_edit=False)
         self.refresh()
 
     def quick_invoice(self, inv_type):
@@ -186,7 +193,7 @@ class DashboardWidget(QWidget):
         self.update_rates_display()
 
     def refresh_kpis(self):
-        summary = db.get_summary()
+        summary = reporting_dao.get_summary()
         settings = get_currency_settings()
         self.kpi_cards.clear()
         self.kpi_cards.add_card("إجمالي المبيعات", format_currency(summary['total_sales'], settings), "💰", "#10b981", "up", "+12%", callback=lambda: self._switch_page('invoices'))

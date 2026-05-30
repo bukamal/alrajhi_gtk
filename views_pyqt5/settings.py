@@ -1,14 +1,17 @@
+# views_pyqt5/settings.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton,
                              QGroupBox, QFileDialog, QMessageBox, QCheckBox, QComboBox, QLabel,
                              QHBoxLayout, QDoubleSpinBox, QTabWidget, QTableView, QHeaderView,
                              QDialog, QDialogButtonBox, QSpinBox)
 from PyQt5.QtCore import Qt, QSettings, QAbstractTableModel, QModelIndex
-from database import db
+from database import exchange_rate_dao, reporting_dao
+from database.connection import DatabaseConnection
 from config import get_currency_settings, save_currency_settings, get_currency_symbol, refresh_currency_settings
 from utils_pyqt5 import show_toast
 from worker_threads import ExportWorker, ImportWorker
-from views_pyqt5.centered_dialog import CenteredDialog
+from views_pyqt5.centered_dialog import CenteredDialog, show_centered_messagebox
 import os, sys
 
 class ExchangeRatesModel(QAbstractTableModel):
@@ -16,7 +19,6 @@ class ExchangeRatesModel(QAbstractTableModel):
         super().__init__()
         self._data = data
         self._headers = headers
-
     def rowCount(self, parent=QModelIndex()): return len(self._data)
     def columnCount(self, parent=QModelIndex()): return len(self._headers)
     def data(self, index, role=Qt.DisplayRole):
@@ -50,19 +52,16 @@ class SettingsWidget(QWidget):
         # تبويب العملات
         currency_tab = QWidget()
         currency_layout = QVBoxLayout(currency_tab)
-
         form = QFormLayout()
         self.base_currency_combo = QComboBox()
         self.display_currency_combo = QComboBox()
         self.symbol_pos_combo = QComboBox()
         self.symbol_pos_combo.addItems(["بعد الرقم (مثال: 100 $)", "قبل الرقم (مثال: $ 100)"])
         self.use_conversion_check = QCheckBox("تحويل القيم إلى العملة المعروضة تلقائياً")
-
         form.addRow("العملة الأساسية (للتخزين):", self.base_currency_combo)
         form.addRow("العملة المعروضة:", self.display_currency_combo)
         form.addRow(self.use_conversion_check)
         form.addRow("موضع رمز العملة:", self.symbol_pos_combo)
-
         currency_layout.addLayout(form)
 
         rates_group = QGroupBox("أسعار الصرف")
@@ -71,7 +70,6 @@ class SettingsWidget(QWidget):
         self.rates_table.setSelectionBehavior(QTableView.SelectRows)
         self.rates_table.setAlternatingRowColors(True)
         rates_layout.addWidget(self.rates_table)
-
         btn_layout = QHBoxLayout()
         add_rate_btn = QPushButton("➕ إضافة عملة")
         add_rate_btn.clicked.connect(self.add_currency)
@@ -86,9 +84,7 @@ class SettingsWidget(QWidget):
         btn_layout.addWidget(delete_rate_btn)
         btn_layout.addWidget(refresh_rates_btn)
         rates_layout.addLayout(btn_layout)
-
         currency_layout.addWidget(rates_group)
-
         save_currency_btn = QPushButton("حفظ إعدادات العملة")
         save_currency_btn.setObjectName("primary")
         save_currency_btn.clicked.connect(self.save_currency_settings)
@@ -147,6 +143,20 @@ class SettingsWidget(QWidget):
         backup_layout.addWidget(self.import_btn)
         backup_layout.addWidget(self.reset_btn)
         backup_layout.addWidget(self.logout_btn)
+
+        # إعدادات النسخ الاحتياطي التلقائي
+        backup_settings_group = QGroupBox("النسخ الاحتياطي التلقائي")
+        backup_settings_layout = QFormLayout(backup_settings_group)
+        self.backup_interval = QSpinBox()
+        self.backup_interval.setRange(1, 30)
+        self.backup_interval.setValue(self.settings.value("backup_interval", 1, type=int))
+        self.backup_interval.setSuffix(" يوم")
+        backup_settings_layout.addRow("النسخ الاحتياطي التلقائي كل:", self.backup_interval)
+        save_backup_btn = QPushButton("حفظ إعدادات النسخ الاحتياطي")
+        save_backup_btn.clicked.connect(self.save_backup_settings)
+        backup_settings_layout.addRow(save_backup_btn)
+        backup_layout.addWidget(backup_settings_group)
+
         backup_layout.addStretch()
         tabs.addTab(backup_tab, "💾 نسخ احتياطي")
 
@@ -155,7 +165,7 @@ class SettingsWidget(QWidget):
 
     def load_currency_settings(self):
         settings = get_currency_settings()
-        rates = db.get_all_exchange_rates()
+        rates = exchange_rate_dao.get_all()
         currencies = [r['currency_code'] for r in rates]
         self.base_currency_combo.clear()
         self.display_currency_combo.clear()
@@ -170,7 +180,7 @@ class SettingsWidget(QWidget):
         self.symbol_pos_combo.setCurrentIndex(0 if settings.get('symbol_position', 'after') == 'after' else 1)
 
     def load_exchange_rates(self):
-        rates = db.get_all_exchange_rates()
+        rates = exchange_rate_dao.get_all()
         data = []
         for r in rates:
             rate_display = 1.0 / float(r['rate_to_usd']) if r['rate_to_usd'] != 0 else 0
@@ -216,20 +226,20 @@ class SettingsWidget(QWidget):
             code = code_edit.text().strip().upper()
             rate = rate_edit.value()
             if not code:
-                show_toast("رمز العملة مطلوب", "error", dialog)
+                show_centered_messagebox(dialog, "خطأ", "رمز العملة مطلوب", QMessageBox.Warning)
                 return
             try:
-                db.add_exchange_rate(code, 1.0 / rate if rate != 0 else 0)
+                exchange_rate_dao.add(code, 1.0 / rate if rate != 0 else 0)
                 self.load_exchange_rates()
                 self.load_currency_settings()
                 show_toast("تمت إضافة العملة", "success", self)
             except Exception as e:
-                show_toast(str(e), "error", self)
+                show_centered_messagebox(dialog, "خطأ", str(e), QMessageBox.Critical)
 
     def edit_rate(self):
         selection = self.rates_table.selectionModel().selectedRows()
         if not selection:
-            show_toast("اختر عملة أولاً", "warning", self)
+            show_centered_messagebox(self, "تنبيه", "اختر عملة أولاً", QMessageBox.Warning)
             return
         row = selection[0].row()
         code = self.rates_model._data[row][0]
@@ -250,31 +260,31 @@ class SettingsWidget(QWidget):
         if dialog.exec():
             new_rate = rate_edit.value()
             try:
-                db.update_exchange_rate(code, 1.0 / new_rate if new_rate != 0 else 0)
+                exchange_rate_dao.update(code, 1.0 / new_rate if new_rate != 0 else 0)
                 self.load_exchange_rates()
                 show_toast("تم تحديث السعر", "success", self)
             except Exception as e:
-                show_toast(str(e), "error", self)
+                show_centered_messagebox(dialog, "خطأ", str(e), QMessageBox.Critical)
 
     def delete_currency(self):
         selection = self.rates_table.selectionModel().selectedRows()
         if not selection:
-            show_toast("اختر عملة أولاً", "warning", self)
+            show_centered_messagebox(self, "تنبيه", "اختر عملة أولاً", QMessageBox.Warning)
             return
         row = selection[0].row()
         code = self.rates_model._data[row][0]
         if code == 'USD':
-            show_toast("لا يمكن حذف الدولار الأمريكي", "error", self)
+            show_centered_messagebox(self, "خطأ", "لا يمكن حذف الدولار الأمريكي", QMessageBox.Warning)
             return
-        reply = QMessageBox.question(self, "تأكيد الحذف", f"هل تريد حذف العملة {code}؟", QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "تأكيد الحذف", f"هل تريد حذف العملة {code}؟", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
-                db.delete_exchange_rate(code)
+                exchange_rate_dao.delete(code)
                 self.load_exchange_rates()
                 self.load_currency_settings()
                 show_toast("تم حذف العملة", "success", self)
             except Exception as e:
-                show_toast(str(e), "error", self)
+                show_centered_messagebox(self, "خطأ", str(e), QMessageBox.Critical)
 
     def fetch_online_rates(self):
         show_toast("سيتم إضافة هذه الميزة قريباً", "info", self)
@@ -287,6 +297,12 @@ class SettingsWidget(QWidget):
     def toggle_touch_mode(self, checked):
         self.settings.setValue("touch_mode", checked)
         show_toast("سيتم تطبيق الوضع اللمسي بعد إعادة التشغيل", "info", self)
+
+    def save_backup_settings(self):
+        self.settings.setValue("backup_interval", self.backup_interval.value())
+        if self.main_window and hasattr(self.main_window, "restart_backup_timer"):
+            self.main_window.restart_backup_timer()
+        show_toast("تم حفظ إعدادات النسخ الاحتياطي", "success", self)
 
     def export_db(self):
         filename, _ = QFileDialog.getSaveFileName(self, "حفظ النسخة الاحتياطية", "alrajhi_backup.json", "JSON (*.json)")
@@ -305,12 +321,12 @@ class SettingsWidget(QWidget):
                 f.write(data)
             show_toast("تم التصدير بنجاح", "success", self)
         except Exception as e:
-            show_toast(str(e), "error", self)
+            show_centered_messagebox(self, "خطأ", str(e), QMessageBox.Critical)
         finally:
             self.export_btn.setEnabled(True)
 
     def _on_export_error(self, msg):
-        show_toast(f"خطأ في التصدير: {msg}", "error", self)
+        show_centered_messagebox(self, "خطأ", f"خطأ في التصدير: {msg}", QMessageBox.Critical)
         self.export_btn.setEnabled(True)
 
     def import_db(self):
@@ -319,8 +335,7 @@ class SettingsWidget(QWidget):
             return
         with open(filename, 'rb') as f:
             data = f.read()
-        reply = QMessageBox.question(self, "تأكيد الاستيراد", "سيتم استبدال جميع البيانات الحالية. هل أنت متأكد?",
-                                     QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "تأكيد الاستيراد", "سيتم استبدال جميع البيانات الحالية. هل أنت متأكد?", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
         self.import_btn.setEnabled(False)
@@ -335,30 +350,28 @@ class SettingsWidget(QWidget):
         self.import_btn.setEnabled(True)
 
     def _on_import_error(self, msg):
-        show_toast(f"خطأ في الاستيراد: {msg}", "error", self)
+        show_centered_messagebox(self, "خطأ", f"خطأ في الاستيراد: {msg}", QMessageBox.Critical)
         self.import_btn.setEnabled(True)
 
     def reset_db(self):
-        global db
-        reply = QMessageBox.warning(self, "إعادة تعيين قاعدة البيانات", "تحذير: سيتم حذف جميع البيانات نهائياً! هل أنت متأكد?",
-                                    QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "إعادة تعيين قاعدة البيانات", "تحذير: سيتم حذف جميع البيانات نهائياً! هل أنت متأكد?", QMessageBox.Warning, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
-                from database import DB_PATH
-                db.close()
+                from database.connection import DB_PATH
+                db_conn = DatabaseConnection()
+                db_conn.close()
                 if os.path.exists(DB_PATH):
                     os.remove(DB_PATH)
-                from database import Database
-                db = Database()
+                DatabaseConnection()
                 show_toast("تم إعادة التعيين", "success", self)
                 if self.main_window:
                     self.main_window.switch_page('dashboard')
             except Exception as e:
-                show_toast(str(e), "error", self)
+                show_centered_messagebox(self, "خطأ", str(e), QMessageBox.Critical)
 
     def logout(self):
-        reply = QMessageBox.question(self, "تسجيل الخروج", "هل تريد تسجيل الخروج؟", QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "تسجيل الخروج", "هل تريد تسجيل الخروج؟", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
-            from database import Session
-            Session.clear_current_user()
+            from database.session import UserSession
+            UserSession.clear_current_user()
             os.execl(sys.executable, sys.executable, *sys.argv)

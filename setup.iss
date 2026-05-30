@@ -12,6 +12,8 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\alrajhi_icon.ico
 PrivilegesRequired=admin
+UsePreviousLanguage=no
+ShowLanguageDialog=yes
 
 [Languages]
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
@@ -32,3 +34,11 @@ Filename: "{app}\AlrajhiAccounting.exe"; Description: "تشغيل التطبيق
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
+
+[Code]
+procedure InitializeWizard;
+begin
+  WizardForm.NextButton.Caption := 'التالي >';
+  WizardForm.CancelButton.Caption := 'إلغاء';
+  WizardForm.BackButton.Caption := '< السابق';
+end;

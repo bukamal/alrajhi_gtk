@@ -1,20 +1,29 @@
+# views_pyqt5/invoice_dialog.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
                              QDoubleSpinBox, QDateEdit, QTextEdit, QGroupBox, QListWidget,
                              QPushButton, QFormLayout, QMessageBox, QShortcut, QLineEdit, QApplication)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QKeySequence
-from database import db
+from database import item_dao, customer_dao, supplier_dao, invoice_dao, exchange_rate_dao, reporting_dao
+from database.utils import storage_to_decimal
 from utils_pyqt5 import format_currency, show_toast
 from config import get_currency_settings, get_current_currency_symbol
 from views_pyqt5.centered_dialog import CenteredDialog
 
-# استيراد اختياري للماسح الضوئي
-try:
-    from views_pyqt5.barcode_scanner import BarcodeScanner
-    BARCODE_SCANNER_AVAILABLE = True
-except ImportError:
-    BARCODE_SCANNER_AVAILABLE = False
+# لا نستورد BarcodeScanner هنا - سنقوم باستيراده عند الحاجة فقط
+BARCODE_SCANNER_AVAILABLE = None
+
+def _get_barcode_scanner():
+    global BARCODE_SCANNER_AVAILABLE
+    try:
+        from views_pyqt5.barcode_scanner import BarcodeScanner
+        BARCODE_SCANNER_AVAILABLE = True
+        return BarcodeScanner
+    except ImportError:
+        BARCODE_SCANNER_AVAILABLE = False
+        return None
 
 class InvoiceDialog(CenteredDialog):
     def __init__(self, inv_type, parent=None):
@@ -31,14 +40,14 @@ class InvoiceDialog(CenteredDialog):
         main_layout = QVBoxLayout(self)
         currency_symbol = get_current_currency_symbol()
 
-        # شريط الباركود السريع
+        # شريط الباركود
         barcode_layout = QHBoxLayout()
         barcode_label = QLabel("باركود:")
         self.barcode_input = QLineEdit()
         self.barcode_input.setPlaceholderText("امسح الباركود أو اكتبه ثم اضغط Enter")
         self.barcode_input.returnPressed.connect(self.add_item_by_barcode)
         self.scan_btn = QPushButton("📷 مسح بالكاميرا")
-        if not BARCODE_SCANNER_AVAILABLE:
+        if _get_barcode_scanner() is None:
             self.scan_btn.setEnabled(False)
             self.scan_btn.setToolTip("مكتبات الكاميرا غير مثبتة")
         else:
@@ -48,19 +57,20 @@ class InvoiceDialog(CenteredDialog):
         barcode_layout.addWidget(self.scan_btn)
         main_layout.addLayout(barcode_layout)
 
+        # قائمة العملاء أو الموردين
         if self.inv_type == 'sale':
-            self.customers = db.get_customers()
+            self.customers = customer_dao.get_all()
             self.entity_combo = QComboBox()
             self.entity_combo.addItem("نقدي", None)
             for c in self.customers:
-                self.entity_combo.addItem(f"{c['name']} (الرصيد: {format_currency(c['balance'])})", c['id'])
+                self.entity_combo.addItem(f"{c.name} (الرصيد: {format_currency(c.balance)})", c.id)
             entity_label = QLabel("العميل:")
         else:
-            self.suppliers = db.get_suppliers()
+            self.suppliers = supplier_dao.get_all()
             self.entity_combo = QComboBox()
             self.entity_combo.addItem("نقدي", None)
             for s in self.suppliers:
-                self.entity_combo.addItem(f"{s['name']} (الرصيد: {format_currency(s['balance'])})", s['id'])
+                self.entity_combo.addItem(f"{s.name} (الرصيد: {format_currency(s.balance)})", s.id)
             entity_label = QLabel("المورد:")
 
         self.balance_label = QLabel()
@@ -71,6 +81,7 @@ class InvoiceDialog(CenteredDialog):
         main_layout.addWidget(self.entity_combo)
         main_layout.addWidget(self.balance_label)
 
+        # مجموعة بنود الفاتورة
         self.group = QGroupBox("بنود الفاتورة")
         group_layout = QVBoxLayout(self.group)
         self.lines_list = QListWidget()
@@ -83,6 +94,7 @@ class InvoiceDialog(CenteredDialog):
         group_layout.addWidget(btn_remove_line)
         main_layout.addWidget(self.group)
 
+        # نموذج المعلومات
         form = QFormLayout()
         self.date_edit = QDateEdit()
         self.date_edit.setDate(QDate.currentDate())
@@ -104,6 +116,7 @@ class InvoiceDialog(CenteredDialog):
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px;")
         main_layout.addWidget(self.total_label)
 
+        # أزرار الحفظ والإلغاء
         btn_layout = QHBoxLayout()
         self.save_btn = QPushButton("حفظ (F2)")
         self.save_btn.setObjectName("primary")
@@ -125,18 +138,19 @@ class InvoiceDialog(CenteredDialog):
             self.balance_label.setVisible(False)
             return
         if self.inv_type == 'sale':
-            customer = next((c for c in self.customers if c['id'] == entity_id), None)
+            customer = next((c for c in self.customers if c.id == entity_id), None)
             if customer:
-                self.balance_label.setText(f"رصيد العميل الحالي: {format_currency(customer['balance'])}")
+                self.balance_label.setText(f"رصيد العميل الحالي: {format_currency(customer.balance)}")
                 self.balance_label.setVisible(True)
         else:
-            supplier = next((s for s in self.suppliers if s['id'] == entity_id), None)
+            supplier = next((s for s in self.suppliers if s.id == entity_id), None)
             if supplier:
-                self.balance_label.setText(f"رصيد المورد الحالي: {format_currency(supplier['balance'])}")
+                self.balance_label.setText(f"رصيد المورد الحالي: {format_currency(supplier.balance)}")
                 self.balance_label.setVisible(True)
 
     def scan_barcode(self):
-        if not BARCODE_SCANNER_AVAILABLE:
+        BarcodeScanner = _get_barcode_scanner()
+        if BarcodeScanner is None:
             show_toast("مكتبات الكاميرا غير مثبتة. لا يمكن المسح.", "error", self)
             return
         scanner = BarcodeScanner(self)
@@ -150,29 +164,29 @@ class InvoiceDialog(CenteredDialog):
         barcode = self.barcode_input.text().strip()
         if not barcode:
             return
-        item = db.get_item_by_barcode(barcode)
+        item = item_dao.get_by_barcode(barcode)
         if not item:
             show_toast(f"لم يتم العثور على مادة بهذا الباركود: {barcode}", "error", self)
             self.barcode_input.clear()
             return
-        price = item.get('selling_price', 0) if self.inv_type == 'sale' else item.get('purchase_price', 0)
+        price = item.selling_price if self.inv_type == 'sale' else item.purchase_price
         line_data = {
-            'item_id': item['id'],
-            'item_name': item['name'],
+            'item_id': item.id,
+            'item_name': item.name,
             'quantity': 1,
-            'unit': item.get('unit', ''),
+            'unit': item.unit,
             'conversion_factor': 1,
             'base_qty': 1,
-            'unit_price': price,
-            'total': price
+            'unit_price': float(price),
+            'total': float(price)
         }
         self.lines.append(line_data)
         unit_display = f" ({line_data['unit']})" if line_data['unit'] else ""
         currency_settings = get_currency_settings()
-        self.lines_list.addItem(f"{item['name']}{unit_display} - 1 × {format_currency(price, currency_settings)} = {format_currency(price, currency_settings)}")
+        self.lines_list.addItem(f"{item.name}{unit_display} - 1 × {format_currency(price, currency_settings)} = {format_currency(price, currency_settings)}")
         self.update_total()
         self.barcode_input.clear()
-        show_toast(f"تمت إضافة {item['name']}", "success", self)
+        show_toast(f"تمت إضافة {item.name}", "success", self)
 
     def setup_shortcuts(self):
         QShortcut(QKeySequence("F2"), self, self.on_save)
@@ -199,12 +213,12 @@ class InvoiceDialog(CenteredDialog):
         barcode_line.addWidget(barcode_search_btn)
         layout.addRow("الباركود:", barcode_line)
 
-        items = db.get_items()
+        items = item_dao.get_items()
         item_combo = QComboBox()
         for it in items:
-            price = it.get('selling_price',0) if self.inv_type=='sale' else it.get('purchase_price',0)
-            barcode_info = f" [باركود: {it['barcode']}]" if it.get('barcode') else ""
-            item_combo.addItem(f"{it['name']} ({format_currency(price, currency_settings)}){barcode_info}", it['id'])
+            price = it.selling_price if self.inv_type == 'sale' else it.purchase_price
+            barcode_info = f" [باركود: {it.barcode}]" if it.barcode else ""
+            item_combo.addItem(f"{it.name} ({format_currency(price, currency_settings)}){barcode_info}", it.id)
         layout.addRow("المادة:", item_combo)
 
         qty_spin = QDoubleSpinBox()
@@ -228,17 +242,17 @@ class InvoiceDialog(CenteredDialog):
             unit_combo.clear()
             unit_combo.addItem("الوحدة الأساسية", 1.0)
             if item_id:
-                subunits = db.get_item_units(item_id)
+                subunits = item_dao.get_units(item_id)
                 for su in subunits:
-                    unit_combo.addItem(su['unit_name'], float(su['conversion_factor']))
+                    unit_combo.addItem(su.unit_name, float(su.conversion_factor))
             update_price()
 
         def update_price():
             item_id = item_combo.currentData()
             if item_id:
-                item = next((i for i in items if i['id']==item_id), None)
+                item = next((i for i in items if i.id == item_id), None)
                 if item:
-                    price = item.get('selling_price',0) if self.inv_type=='sale' else item.get('purchase_price',0)
+                    price = item.selling_price if self.inv_type == 'sale' else item.purchase_price
                     price_spin.setValue(float(price))
 
         item_combo.currentIndexChanged.connect(update_units)
@@ -256,7 +270,7 @@ class InvoiceDialog(CenteredDialog):
             if not item_id:
                 show_toast("اختر مادة", "error", dialog)
                 return
-            item = next((i for i in items if i['id']==item_id), None)
+            item = next((i for i in items if i.id == item_id), None)
             if not item:
                 return
             qty = qty_spin.value()
@@ -267,9 +281,9 @@ class InvoiceDialog(CenteredDialog):
             total = base_qty * price
             line_data = {
                 'item_id': item_id,
-                'item_name': item['name'],
+                'item_name': item.name,
                 'quantity': qty,
-                'unit': unit_name if unit_name != "الوحدة الأساسية" else item.get('unit', ''),
+                'unit': unit_name if unit_name != "الوحدة الأساسية" else item.unit,
                 'conversion_factor': factor,
                 'base_qty': base_qty,
                 'unit_price': price,
@@ -277,7 +291,7 @@ class InvoiceDialog(CenteredDialog):
             }
             self.lines.append(line_data)
             unit_display = f" ({line_data['unit']})" if line_data['unit'] else ""
-            self.lines_list.addItem(f"{item['name']}{unit_display} - {qty} × {format_currency(price, currency_settings)} = {format_currency(total, currency_settings)}")
+            self.lines_list.addItem(f"{item.name}{unit_display} - {qty} × {format_currency(price, currency_settings)} = {format_currency(total, currency_settings)}")
             self.update_total()
             dialog.accept()
 
@@ -289,9 +303,9 @@ class InvoiceDialog(CenteredDialog):
         barcode = barcode_edit.text().strip()
         if not barcode:
             return
-        item = db.get_item_by_barcode(barcode)
+        item = item_dao.get_by_barcode(barcode)
         if item:
-            idx = item_combo.findData(item['id'])
+            idx = item_combo.findData(item.id)
             if idx >= 0:
                 item_combo.setCurrentIndex(idx)
                 self.update_units_for_combo(item_combo, unit_combo, price_spin)
@@ -309,13 +323,13 @@ class InvoiceDialog(CenteredDialog):
         unit_combo.clear()
         unit_combo.addItem("الوحدة الأساسية", 1.0)
         if item_id:
-            subunits = db.get_item_units(item_id)
+            subunits = item_dao.get_units(item_id)
             for su in subunits:
-                unit_combo.addItem(su['unit_name'], float(su['conversion_factor']))
-        items = db.get_items()
-        item = next((i for i in items if i['id'] == item_id), None)
+                unit_combo.addItem(su.unit_name, float(su.conversion_factor))
+        items = item_dao.get_items()
+        item = next((i for i in items if i.id == item_id), None)
         if item:
-            price = item.get('selling_price',0) if self.inv_type=='sale' else item.get('purchase_price',0)
+            price = item.selling_price if self.inv_type == 'sale' else item.purchase_price
             price_spin.setValue(float(price))
 
     def remove_selected_line(self):
@@ -342,16 +356,16 @@ class InvoiceDialog(CenteredDialog):
         entity_id = self.entity_combo.currentData()
         reference = self.ref_edit.toPlainText().strip()
         if not reference:
-            reference = db.get_next_invoice_reference(self.inv_type)
+            reference = invoice_dao.get_next_reference(self.inv_type)
         else:
-            invoices = db.get_invoices()
-            if any(inv.get('reference') == reference for inv in invoices):
+            invoices = invoice_dao.get_all()
+            if any(inv.reference == reference for inv in invoices):
                 show_toast("المرجع موجود مسبقاً، يرجى استخدام مرجع آخر", "error", self)
                 return
         data = {
             'type': self.inv_type,
-            'customer_id': entity_id if self.inv_type=='sale' else None,
-            'supplier_id': entity_id if self.inv_type=='purchase' else None,
+            'customer_id': entity_id if self.inv_type == 'sale' else None,
+            'supplier_id': entity_id if self.inv_type == 'purchase' else None,
             'date': self.date_edit.date().toString("yyyy-MM-dd"),
             'reference': reference,
             'notes': self.notes_edit.toPlainText().strip(),
@@ -360,7 +374,7 @@ class InvoiceDialog(CenteredDialog):
             'lines': self.lines
         }
         try:
-            db.create_invoice(data)
+            invoice_dao.create_invoice(data)
             show_toast("تم حفظ الفاتورة", "success", self)
             self.accept()
         except Exception as e:
@@ -411,24 +425,43 @@ class InvoiceDialog(CenteredDialog):
                 </div>
                 <div class="info">
                     <table>
-                        <tr><td style="font-weight:bold;">التاريخ:浏<td>{inv_date}浏
-                        <td style="font-weight:bold;">{entity_label}:浏<td>{entity_name}浏
+                        <tr>
+                            <td style="font-weight:bold;">التاريخ:浏
+                            <td>{inv_date}浏
+                            <td style="font-weight:bold;">{entity_label}:浏
+                            <td>{entity_name}浏
+                        </tr>
                     </table>
                 </div>
                 <table class="items">
-                    <thead><tr><th>المادة</th><th>الكمية</th><th>الوحدة</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+                    <thead>
+                        <tr><th>المادة</th><th>الكمية</th><th>الوحدة</th><th>السعر</th><th>الإجمالي</th></tr>
+                    </thead>
                     <tbody>
         """
         for line in lines:
-            html += f"<tr><td>{line['item_name']}浏<td>{line['quantity']}浏<td>{line.get('unit', '')}浏<td>{format_currency(line['unit_price'])}浏<td>{format_currency(line['total'])}浏</tr>"
+            html += f"""
+                        <tr>
+                            <td style='padding:8px;'>{line['item_name']}浏
+                            <td style='padding:8px;'>{line['quantity']}浏
+                            <td style='padding:8px;'>{line.get('unit', '')}浏
+                            <td style='padding:8px;'>{format_currency(line['unit_price'])}浏
+                            <td style='padding:8px;'>{format_currency(line['total'])}浏
+                        </tr>
+            """
         html += f"""
                     </tbody>
                 </table>
                 <div class="totals">
                     <table>
-                        <tr><td style="font-weight:bold;">الإجمالي:浏<td>{format_currency(total)}浏
-                        <td style="font-weight:bold;">المدفوع:浏<td>{format_currency(paid)}浏
-                        <td style="font-weight:bold;">المتبقي:浏<td>{format_currency(remaining)}浏
+                        <tr>
+                            <td style="font-weight:bold;">الإجمالي:浏
+                            <td>{format_currency(total)}浏
+                            <td style="font-weight:bold;">المدفوع:浏
+                            <td>{format_currency(paid)}浏
+                            <td style="font-weight:bold;">المتبقي:浏
+                            <td>{format_currency(remaining)}浏
+                        </tr>
                     </table>
                 </div>
         """
@@ -458,18 +491,18 @@ class InvoiceDialog(CenteredDialog):
         widget = CustomersSuppliersWidget(dialog, 'customer' if self.inv_type=='sale' else 'supplier')
         def on_close():
             if self.inv_type == 'sale':
-                self.customers = db.get_customers()
+                self.customers = customer_dao.get_all()
                 self.entity_combo.clear()
                 self.entity_combo.addItem("نقدي", None)
                 for c in self.customers:
-                    self.entity_combo.addItem(f"{c['name']} (الرصيد: {format_currency(c['balance'])})", c['id'])
+                    self.entity_combo.addItem(f"{c.name} (الرصيد: {format_currency(c.balance)})", c.id)
                 self.update_balance_display()
             else:
-                self.suppliers = db.get_suppliers()
+                self.suppliers = supplier_dao.get_all()
                 self.entity_combo.clear()
                 self.entity_combo.addItem("نقدي", None)
                 for s in self.suppliers:
-                    self.entity_combo.addItem(f"{s['name']} (الرصيد: {format_currency(s['balance'])})", s['id'])
+                    self.entity_combo.addItem(f"{s.name} (الرصيد: {format_currency(s.balance)})", s.id)
                 self.update_balance_display()
             dialog.accept()
         widget.add_btn.clicked.disconnect()

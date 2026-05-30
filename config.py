@@ -64,7 +64,6 @@ def get_currency_settings():
     global _current_currency_settings
     if _current_currency_settings is not None:
         return _current_currency_settings
-    from database import db
     settings_file = os.path.join(os.path.dirname(__file__), 'data', 'currency_settings.json')
     if os.path.exists(settings_file):
         with open(settings_file, 'r', encoding='utf-8') as f:
@@ -101,9 +100,9 @@ def refresh_currency_settings():
 def convert_currency(amount, from_curr, to_curr):
     if from_curr == to_curr:
         return amount
-    from database import db
-    from_rate = db.get_exchange_rate(from_curr)
-    to_rate = db.get_exchange_rate(to_curr)
+    from database import exchange_rate_dao
+    from_rate = exchange_rate_dao.get_rate(from_curr)
+    to_rate = exchange_rate_dao.get_rate(to_curr)
     return amount * (from_rate / to_rate)
 
 def format_currency_with_settings(amount, settings=None):

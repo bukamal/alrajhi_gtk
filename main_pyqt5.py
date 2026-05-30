@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import sys
+
 import os
+import sys
+
+# ========== Fix for OpenCV Qt plugin conflict ==========
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""   # منع OpenCV من فرض مساره
+os.environ["OPENCV_OPENCL_RUNTIME"] = ""         # تعطيل OpenCL
+os.environ["QT_QPA_PLATFORM"] = "xcb"            # استخدام xcb
+os.environ["OPENCV_QT_PLUGIN_PATH"] = ""         # منع OpenCV من استخدام Qt plugins الخاصة به
+os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu:" + os.environ.get("LD_LIBRARY_PATH", "")
+os.environ["QT_DEBUG_PLUGINS"] = "0"             # إخفاء تحذيرات المكونات الإضافية
+
+# تعطيل تحذيرات zbar إذا لم توجد المكتبة
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+# استيراد PyQt5 بعد ضبط البيئة
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QLabel, QFrame, QMenuBar, QAction,
-                             QStatusBar, QShortcut, QDialog)
+                             QStatusBar, QShortcut, QDialog, QSystemTrayIcon, QMenu)
 from PyQt5.QtGui import QFont, QKeySequence, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSettings, QPoint, QSize, QTimer
+from datetime import datetime, timedelta
 
 def resource_path(relative_path):
     try:
@@ -32,11 +47,16 @@ except:
 import qt_material
 import qtawesome as qta
 
-from database import db
+from database import reporting_dao, invoice_dao, customer_dao, supplier_dao, item_dao, voucher_dao, expense_dao, exchange_rate_dao
+from database.connection import DatabaseConnection
 from activation import check_activation
 from auth import is_admin, get_current_user
 from splash_screen import ModernSplashScreen
 from welcome_screen import WelcomeScreen
+
+# ========== منع OpenCV من التحميل المبكر ==========
+# سنقوم باستيراد barcode_scanner فقط عند الحاجة (في invoice_dialog)
+# لذا لا نستورد أي شيء من barcode_scanner هنا
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -162,6 +182,11 @@ class MainWindow(QMainWindow):
         self.switch_page('dashboard')
         self.apply_theme(self.current_theme)
 
+        self.setup_reminder()
+        self.backup_timer = QTimer()
+        self.backup_timer.timeout.connect(self.perform_auto_backup)
+        self.restart_backup_timer()
+
     def init_pages(self):
         from views_pyqt5.dashboard import DashboardWidget
         from views_pyqt5.items import ItemsWidget
@@ -169,7 +194,7 @@ class MainWindow(QMainWindow):
         from views_pyqt5.customers_suppliers import CustomersSuppliersWidget
         from views_pyqt5.categories_units import CategoriesUnitsWidget
         from views_pyqt5.vouchers import VouchersWidget
-        from views_pyqt5.reports import ReportsWidget
+        from views_pyqt5.reports_widget import ReportsWidget
         from views_pyqt5.settings import SettingsWidget
         from views_pyqt5.users import UsersWidget
         self.pages['dashboard'] = DashboardWidget(self)
@@ -252,14 +277,52 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"فتح {page_name}", 2000)
 
     def update_badges(self):
-        invoices = db.get_invoices()
-        pending = sum(1 for i in invoices if i['total'] > i['paid'])
+        invoices = invoice_dao.get_all()
+        pending = sum(1 for inv in invoices if inv.total > inv.paid)
         self.top_bar.set_badge("الفواتير", pending)
 
     def show_global_search(self):
         from views_pyqt5.global_search import GlobalSearchDialog
         dialog = GlobalSearchDialog(self)
         dialog.exec()
+
+    def setup_reminder(self):
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.windowIcon())
+        self.tray_icon.setVisible(True)
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("عرض التطبيق")
+        show_action.triggered.connect(self.showNormal)
+        quit_action = tray_menu.addAction("خروج")
+        quit_action.triggered.connect(self.close)
+        self.tray_icon.setContextMenu(tray_menu)
+
+        self.reminder_timer = QTimer()
+        self.reminder_timer.timeout.connect(self.check_overdue_invoices)
+        self.reminder_timer.start(3600000)
+        self.check_overdue_invoices()
+
+    def check_overdue_invoices(self):
+        invoices = invoice_dao.get_all()
+        overdue = 0
+        for inv in invoices:
+            if inv.total - inv.paid > 0:
+                overdue += 1
+        if overdue > 0:
+            self.tray_icon.showMessage("تذكير بالدفعات", f"لديك {overdue} فاتورة غير مسددة.", QSystemTrayIcon.Warning, 5000)
+        self.top_bar.set_badge("الفواتير", overdue)
+
+    def restart_backup_timer(self):
+        settings = QSettings("Alrajhi", "Accounting")
+        interval_days = settings.value("backup_interval", 1, type=int)
+        interval_ms = interval_days * 24 * 3600 * 1000
+        self.backup_timer.start(interval_ms)
+
+    def perform_auto_backup(self):
+        from utils_pyqt5 import create_auto_backup, show_toast
+        backup_file = create_auto_backup()
+        if backup_file:
+            show_toast(f"تم إنشاء نسخة احتياطية تلقائية: {os.path.basename(backup_file)}", "success", self)
 
 def main():
     app = QApplication(sys.argv)
@@ -268,14 +331,7 @@ def main():
 
     splash = ModernSplashScreen()
     splash.show()
-    splash.set_progress(5, "جاري تهيئة النظام...")
-    QApplication.processEvents()
-
-    # التحقق من وجود قاعدة البيانات وإنشائها
-    splash.set_progress(15, "التحقق من قاعدة البيانات...")
-    from database import DB_PATH
-    if not os.path.exists(DB_PATH):
-        splash.set_progress(20, "إنشاء قاعدة البيانات...")
+    splash.set_progress(10, "جاري تهيئة النظام...")
     QApplication.processEvents()
 
     splash.set_progress(30, "التحقق من التفعيل...")
@@ -286,7 +342,7 @@ def main():
     QApplication.processEvents()
 
     if not activation_result or (isinstance(activation_result, dict) and not activation_result.get('valid')):
-        splash.set_progress(60, "التفعيل مطلوب...")
+        splash.set_progress(70, "التفعيل مطلوب...")
         QApplication.processEvents()
         from activation_dialog_pyqt5 import ActivationDialog
         dialog = ActivationDialog()
@@ -296,12 +352,14 @@ def main():
         splash.show()
         splash.set_progress(80, "تم التفعيل، جاري المتابعة...")
         QApplication.processEvents()
-    else:
-        splash.set_progress(70, "الترخيص ساري...")
-        QApplication.processEvents()
 
-    splash.set_progress(85, "تحميل الإعدادات...")
-    QApplication.processEvents()
+    db_conn = DatabaseConnection()
+    if db_conn.check_default_admin_password():
+        splash.set_progress(85, "كلمة المرور الافتراضية للمسؤول تحتاج إلى تغيير...")
+        QApplication.processEvents()
+        from views_pyqt5.change_password_dialog import ChangeAdminPasswordDialog
+        dlg = ChangeAdminPasswordDialog()
+        dlg.exec()
 
     splash.set_progress(90, "تسجيل الدخول...")
     QApplication.processEvents()
@@ -311,13 +369,9 @@ def main():
     if login.exec() != QDialog.Accepted:
         sys.exit(0)
 
-    splash.show()
-    splash.set_progress(95, "مرحباً بك...")
-    QApplication.processEvents()
-
     user_data = get_current_user()
     if user_data:
-        summary = db.get_summary()
+        summary = reporting_dao.get_summary()
         welcome = WelcomeScreen(user_data, summary)
         welcome.exec()
 

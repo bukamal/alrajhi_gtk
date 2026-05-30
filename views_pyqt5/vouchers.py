@@ -1,128 +1,114 @@
+# views_pyqt5/vouchers.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QLabel, QComboBox, QDateEdit, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QColor
-from database import db
+from database import voucher_dao, customer_dao, supplier_dao, invoice_dao, reporting_dao
 from utils_pyqt5 import format_currency, show_toast
 from views_pyqt5.base_table_model import BaseTableModel
 from views_pyqt5.centered_dialog import CenteredDialog
 from views_pyqt5.modern_table import ModernTableView
+from views_pyqt5.base_widget import BaseWidget
 
-class VouchersWidget(QWidget):
+
+class VouchersWidget(BaseWidget):
+    entity_name = "سند"
+    search_placeholder = "بحث عن سند..."
+    headers = ["#", "النوع", "التاريخ", "المرجع", "الجهة", "المبلغ"]
+    has_delete = True
+    has_add = True
+    has_export = True
+    has_print = True
+    has_pagination = True
+    page_size = 50
+    extra_buttons = [
+        ("🖨️ طباعة إيصال", "print_receipt", "btn_print"),
+        ("📄 كشف حساب الجهة", "show_entity_statement", "btn_statement"),
+        ("🧾 فتح الفاتورة المرتبطة", "open_related_invoice", "btn_invoice"),
+    ]
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.current_voucher_id = None
-        self.current_voucher_type = None
-        self.init_ui()
-        self.refresh()
-
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(6)
-        layout.setContentsMargins(6,6,6,6)
-
-        # شريط البحث والفلاتر
-        top = QHBoxLayout()
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("بحث عن سند...")
-        self.search_edit.textChanged.connect(self.refresh)
-        top.addWidget(self.search_edit)
-
         self.type_filter = QComboBox()
+        self.start_date = QDateEdit()
+        self.end_date = QDateEdit()
+        self.entity_filter = QComboBox()
+        self.current_voucher_type = None
+        self.current_entity_id = None
+        self.current_invoice_id = None
+        super().__init__(parent)
+        self.init_filters()
+        self.load_entities()
+
+    def init_filters(self):
+        filter_layout = QHBoxLayout()
         self.type_filter.addItem("جميع الأنواع", None)
         self.type_filter.addItem("قبض", "receipt")
         self.type_filter.addItem("دفع", "payment")
         self.type_filter.addItem("مصروف", "expense")
         self.type_filter.currentIndexChanged.connect(self.refresh)
-        top.addWidget(QLabel("النوع:"))
-        top.addWidget(self.type_filter)
+        filter_layout.addWidget(QLabel("النوع:"))
+        filter_layout.addWidget(self.type_filter)
 
-        top.addWidget(QLabel("من تاريخ:"))
-        self.start_date = QDateEdit()
+        filter_layout.addWidget(QLabel("من تاريخ:"))
         self.start_date.setDate(QDate.currentDate().addDays(-30))
         self.start_date.setCalendarPopup(True)
         self.start_date.dateChanged.connect(self.refresh)
-        top.addWidget(self.start_date)
+        filter_layout.addWidget(self.start_date)
 
-        top.addWidget(QLabel("إلى تاريخ:"))
-        self.end_date = QDateEdit()
+        filter_layout.addWidget(QLabel("إلى تاريخ:"))
         self.end_date.setDate(QDate.currentDate())
         self.end_date.setCalendarPopup(True)
         self.end_date.dateChanged.connect(self.refresh)
-        top.addWidget(self.end_date)
+        filter_layout.addWidget(self.end_date)
 
-        self.entity_filter = QComboBox()
+        filter_layout.addWidget(QLabel("الجهة:"))
         self.entity_filter.addItem("الكل", None)
         self.entity_filter.currentIndexChanged.connect(self.refresh)
-        top.addWidget(QLabel("الجهة:"))
-        top.addWidget(self.entity_filter)
+        filter_layout.addWidget(self.entity_filter)
 
-        self.add_btn = QPushButton("➕ إضافة سند")
-        self.add_btn.setObjectName("primary")
-        self.add_btn.clicked.connect(self.add_voucher)
-        top.addWidget(self.add_btn)
-
-        self.delete_btn = QPushButton("🗑 حذف المحدد")
-        self.delete_btn.setObjectName("danger")
-        self.delete_btn.setEnabled(False)
-        self.delete_btn.clicked.connect(self.delete_selected)
-        top.addWidget(self.delete_btn)
-
-        # أزرار الدفعة الثانية
-        self.print_receipt_btn = QPushButton("🖨️ طباعة إيصال")
-        self.print_receipt_btn.setEnabled(False)
-        self.print_receipt_btn.clicked.connect(self.print_receipt)
-        top.addWidget(self.print_receipt_btn)
-
-        self.show_entity_statement_btn = QPushButton("📄 كشف حساب الجهة")
-        self.show_entity_statement_btn.setEnabled(False)
-        self.show_entity_statement_btn.clicked.connect(self.show_entity_statement)
-        top.addWidget(self.show_entity_statement_btn)
-
-        self.open_invoice_btn = QPushButton("🧾 فتح الفاتورة المرتبطة")
-        self.open_invoice_btn.setEnabled(False)
-        self.open_invoice_btn.clicked.connect(self.open_related_invoice)
-        top.addWidget(self.open_invoice_btn)
-
-        self.refresh_btn = QPushButton("🔄 تحديث")
-        self.refresh_btn.clicked.connect(self.refresh)
-        top.addWidget(self.refresh_btn)
-
-        self.export_excel_btn = QPushButton("📊 Excel")
-        self.export_excel_btn.clicked.connect(self.export_to_excel)
-        top.addWidget(self.export_excel_btn)
-
-        self.print_btn = QPushButton("🖨️ طباعة القائمة")
-        self.print_btn.clicked.connect(self.print_list)
-        top.addWidget(self.print_btn)
-
-        layout.addLayout(top)
-
-        self.table = ModernTableView()
-        self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setAlternatingRowColors(True)
-        self.table.doubleClicked.connect(self.view_voucher)
-        # لا نربط selectionChanged هنا
-        layout.addWidget(self.table)
-
-        self.status_label = QLabel()
-        layout.addWidget(self.status_label)
-
-        self.load_entities()
+        filter_layout.addStretch()
+        self.layout.insertLayout(2, filter_layout)
 
     def load_entities(self):
-        customers = db.get_customers()
-        suppliers = db.get_suppliers()
+        customers = customer_dao.get_all()
+        suppliers = supplier_dao.get_all()
         self.entity_filter.clear()
         self.entity_filter.addItem("الكل", None)
         for c in customers:
-            self.entity_filter.addItem(f"عميل: {c['name']}", ('customer', c['id']))
+            self.entity_filter.addItem(f"عميل: {c.name}", ('customer', c.id))
         for s in suppliers:
-            self.entity_filter.addItem(f"مورد: {s['name']}", ('supplier', s['id']))
+            self.entity_filter.addItem(f"مورد: {s.name}", ('supplier', s.id))
 
-    def refresh(self):
-        search = self.search_edit.text().strip().lower() or None
+    def get_total_count(self, search=None):
+        vouchers = voucher_dao.get_all(search=search)
+        if not vouchers:
+            return 0
+        vtype = self.type_filter.currentData()
+        start_date = self.start_date.date().toString("yyyy-MM-dd")
+        end_date = self.end_date.date().toString("yyyy-MM-dd")
+        entity = self.entity_filter.currentData()
+        entity_id = entity[1] if entity else None
+        entity_type = entity[0] if entity else None
+        filtered = 0
+        for v in vouchers:
+            if vtype and v['type'] != vtype:
+                continue
+            if v['date'] < start_date or v['date'] > end_date:
+                continue
+            if entity_id:
+                if entity_type == 'customer' and v.get('customer_id') != entity_id:
+                    continue
+                if entity_type == 'supplier' and v.get('supplier_id') != entity_id:
+                    continue
+            filtered += 1
+        return filtered
+
+    def fetch_data(self, search=None, limit=None, offset=None):
+        vouchers = voucher_dao.get_all(search=search)
+        if not vouchers:
+            return []
         vtype = self.type_filter.currentData()
         start_date = self.start_date.date().toString("yyyy-MM-dd")
         end_date = self.end_date.date().toString("yyyy-MM-dd")
@@ -130,15 +116,11 @@ class VouchersWidget(QWidget):
         entity_id = entity[1] if entity else None
         entity_type = entity[0] if entity else None
 
-        vouchers = db.get_vouchers(search=search)
-        if not vouchers:
-            vouchers = []
-
         filtered = []
         for v in vouchers:
-            if vtype and v.get('type') != vtype:
+            if vtype and v['type'] != vtype:
                 continue
-            if v.get('date') < start_date or v.get('date') > end_date:
+            if v['date'] < start_date or v['date'] > end_date:
                 continue
             if entity_id:
                 if entity_type == 'customer' and v.get('customer_id') != entity_id:
@@ -146,12 +128,16 @@ class VouchersWidget(QWidget):
                 if entity_type == 'supplier' and v.get('supplier_id') != entity_id:
                     continue
             filtered.append(v)
+        if limit is not None and offset is not None:
+            return filtered[offset:offset+limit]
+        return filtered
 
-        customers = {c['id']: c['name'] for c in db.get_customers()}
-        suppliers = {s['id']: s['name'] for s in db.get_suppliers()}
+    def prepare_table_data(self, items):
+        customers = {c.id: c.name for c in customer_dao.get_all()}
+        suppliers = {s.id: s.name for s in supplier_dao.get_all()}
         data = []
-        row_colors = []
-        for v in filtered:
+        self.row_colors = []
+        for v in items:
             typ = "قبض" if v['type'] == 'receipt' else "دفع" if v['type'] == 'payment' else "مصروف"
             entity_name = ""
             if v.get('customer_id'):
@@ -164,92 +150,50 @@ class VouchersWidget(QWidget):
                 v['date'],
                 v.get('reference', ''),
                 entity_name,
-                format_currency(v['amount'])
+                v['amount']
             ])
             if v['type'] == 'receipt':
-                row_colors.append(QColor(220, 252, 231))
+                self.row_colors.append(QColor(220, 252, 231))
             elif v['type'] == 'payment':
-                row_colors.append(QColor(254, 226, 226))
+                self.row_colors.append(QColor(254, 226, 226))
             else:
-                row_colors.append(QColor(255, 237, 213))
+                self.row_colors.append(QColor(255, 237, 213))
+        return data
 
-        headers = ["#", "النوع", "التاريخ", "المرجع", "الجهة", "المبلغ"]
-        self.model = BaseTableModel(data, headers)
-        self.table.setModel(self.model)
-        self.table.setColumnHidden(0, True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
-        for row, color in enumerate(row_colors):
+    def after_refresh(self):
+        for row, color in enumerate(self.row_colors):
             self.model.set_row_background(row, color)
 
-        # ربط إشارة تحديد الصف بعد تعيين النموذج
-        if self.table.selectionModel():
-            try:
-                self.table.selectionModel().selectionChanged.disconnect()
-            except:
-                pass
-            self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
-
-        self.delete_btn.setEnabled(False)
-        self.print_receipt_btn.setEnabled(False)
-        self.show_entity_statement_btn.setEnabled(False)
-        self.open_invoice_btn.setEnabled(False)
-        self.current_voucher_id = None
-        self.current_voucher_type = None
-        self.current_entity_id = None
-        self.current_invoice_id = None
-        self.status_label.setText(f"إجمالي السجلات: {len(filtered)}")
-
     def on_selection_changed(self, selected, deselected):
-        rows = self.table.selectionModel().selectedRows()
-        if rows:
-            row = rows[0].row()
-            self.current_voucher_id = self.model._data[row][0]
-            vouchers = db.get_vouchers()
-            v = next((v for v in vouchers if v['id'] == self.current_voucher_id), None)
+        super().on_selection_changed(selected, deselected)
+        if self.current_id:
+            vouchers = voucher_dao.get_all()
+            v = next((v for v in vouchers if v['id'] == self.current_id), None)
             if v:
                 self.current_voucher_type = v['type']
                 self.current_entity_id = v.get('customer_id') or v.get('supplier_id')
                 self.current_invoice_id = v.get('invoice_id')
-            self.delete_btn.setEnabled(True)
-            self.print_receipt_btn.setEnabled(True)
-            self.show_entity_statement_btn.setEnabled(True)
-            self.open_invoice_btn.setEnabled(self.current_invoice_id is not None)
+                self.btn_invoice.setEnabled(self.current_invoice_id is not None)
+            else:
+                self.current_voucher_type = None
+                self.current_entity_id = None
+                self.current_invoice_id = None
+                self.btn_invoice.setEnabled(False)
         else:
-            self.current_voucher_id = None
             self.current_voucher_type = None
             self.current_entity_id = None
             self.current_invoice_id = None
-            self.delete_btn.setEnabled(False)
-            self.print_receipt_btn.setEnabled(False)
-            self.show_entity_statement_btn.setEnabled(False)
-            self.open_invoice_btn.setEnabled(False)
+            self.btn_invoice.setEnabled(False)
 
-    def add_voucher(self):
-        self.open_voucher_dialog()
-
-    def view_voucher(self, index):
-        row = index.row()
-        vid = self.model._data[row][0]
-        self.open_voucher_dialog(is_edit=True, voucher_id=vid)
-
-    def delete_selected(self):
-        if not self.current_voucher_id:
-            return
-        reply = QMessageBox.question(self, "تأكيد الحذف", "هل تريد حذف هذا السند؟", QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            try:
-                db.delete_voucher(self.current_voucher_id)
-                show_toast("تم حذف السند", "success", self)
-                self.refresh()
-            except Exception as e:
-                show_toast(str(e), "error", self)
+    def delete_item(self, item_id):
+        voucher_dao.delete(item_id)
 
     def print_receipt(self):
-        if not self.current_voucher_id:
+        if not self.current_id:
+            show_toast("لم يتم تحديد سند", "error", self)
             return
-        vouchers = db.get_vouchers()
-        v = next((v for v in vouchers if v['id'] == self.current_voucher_id), None)
+        vouchers = voucher_dao.get_all()
+        v = next((v for v in vouchers if v['id'] == self.current_id), None)
         if not v:
             show_toast("لم يتم العثور على السند", "error", self)
             return
@@ -259,13 +203,13 @@ class VouchersWidget(QWidget):
         typ = "قبض" if v['type'] == 'receipt' else "دفع" if v['type'] == 'payment' else "مصروف"
         entity_name = ""
         if v.get('customer_id'):
-            customers = db.get_customers()
-            c = next((c for c in customers if c['id'] == v['customer_id']), None)
-            entity_name = c['name'] if c else ''
+            customers = customer_dao.get_all()
+            c = next((c for c in customers if c.id == v['customer_id']), None)
+            entity_name = c.name if c else ''
         elif v.get('supplier_id'):
-            suppliers = db.get_suppliers()
-            s = next((s for s in suppliers if s['id'] == v['supplier_id']), None)
-            entity_name = s['name'] if s else ''
+            suppliers = supplier_dao.get_all()
+            s = next((s for s in suppliers if s.id == v['supplier_id']), None)
+            entity_name = s.name if s else ''
         html = f"""
         <!DOCTYPE html>
         <html dir="rtl">
@@ -306,10 +250,7 @@ class VouchersWidget(QWidget):
             show_toast("لا توجد جهة مرتبطة بهذا السند", "error", self)
             return
         if self.current_voucher_type in ('receipt', 'payment'):
-            if self.current_voucher_type == 'receipt':
-                entity_type = 'customer'
-            else:
-                entity_type = 'supplier'
+            entity_type = 'customer' if self.current_voucher_type == 'receipt' else 'supplier'
         else:
             show_toast("هذا السند ليس مرتبطاً بعميل أو مورد", "error", self)
             return
@@ -318,10 +259,10 @@ class VouchersWidget(QWidget):
         dialog.resize(700, 500)
         layout = QVBoxLayout(dialog)
         if entity_type == 'customer':
-            lines = db.get_customer_statement(self.current_entity_id)
+            lines = reporting_dao.get_customer_statement(self.current_entity_id)
             title = "كشف حساب عميل"
         else:
-            lines = db.get_supplier_statement(self.current_entity_id)
+            lines = reporting_dao.get_supplier_statement(self.current_entity_id)
             title = "كشف حساب مورد"
         if not lines:
             label = QLabel("لا توجد حركات لهذه الجهة")
@@ -337,7 +278,7 @@ class VouchersWidget(QWidget):
                 <thead>
                     <tr style="background-color:#34495e; color:white;">
                         <th>التاريخ</th><th>الوصف</th><th>مدين</th><th>دائن</th><th>الرصيد</th>
-                    </tr>
+                    </td>
                 </thead>
                 <tbody>
             """
@@ -365,23 +306,22 @@ class VouchersWidget(QWidget):
         if not self.current_invoice_id:
             show_toast("هذا السند غير مرتبط بفاتورة", "error", self)
             return
-        invoices = db.get_invoices()
-        inv = next((i for i in invoices if i['id'] == self.current_invoice_id), None)
+        inv = invoice_dao.get_by_id(self.current_invoice_id)
         if not inv:
             show_toast("الفاتورة غير موجودة", "error", self)
             return
         dialog = CenteredDialog(self)
-        dialog.setWindowTitle(f"فاتورة {inv.get('reference', '')}")
+        dialog.setWindowTitle(f"فاتورة {inv.reference}")
         dialog.resize(600, 500)
         layout = QVBoxLayout(dialog)
-        inv_type = "بيع" if inv.get('type') == 'sale' else "شراء"
-        total = inv.get('total', 0)
-        paid = inv.get('paid', 0)
+        inv_type = "بيع" if inv.type == 'sale' else "شراء"
+        total = inv.total
+        paid = inv.paid
         remaining = total - paid
         info_text = f"""
         <b>النوع:</b> {inv_type}<br>
-        <b>التاريخ:</b> {inv.get('date', '')}<br>
-        <b>المرجع:</b> {inv.get('reference', '')}<br>
+        <b>التاريخ:</b> {inv.date}<br>
+        <b>المرجع:</b> {inv.reference}<br>
         <b>الإجمالي:</b> {format_currency(total)}<br>
         <b>المدفوع:</b> {format_currency(paid)}<br>
         <b>المتبقي:</b> {format_currency(remaining)}<br>
@@ -394,8 +334,9 @@ class VouchersWidget(QWidget):
         layout.addWidget(close_btn)
         dialog.exec()
 
-    def open_voucher_dialog(self, is_edit=False, voucher_id=None):
-        dialog = CenteredDialog(self)
+    def open_dialog(self, is_edit=False, item_id=None, dialog_parent=None):
+        parent_for_dialog = dialog_parent if dialog_parent else self
+        dialog = CenteredDialog(parent_for_dialog)
         dialog.setWindowTitle("تعديل سند" if is_edit else "إضافة سند جديد")
         dialog.setLayoutDirection(Qt.RightToLeft)
         dialog.resize(450, 420)
@@ -409,14 +350,14 @@ class VouchersWidget(QWidget):
 
         cust_combo = QComboBox()
         cust_combo.addItem("اختر عميل", None)
-        customers = db.get_customers()
+        customers = customer_dao.get_all()
         for c in customers:
-            cust_combo.addItem(f"{c['name']} (الرصيد: {format_currency(c['balance'])})", c['id'])
+            cust_combo.addItem(f"{c.name} (الرصيد: {format_currency(c.balance)})", c.id)
         supp_combo = QComboBox()
         supp_combo.addItem("اختر مورد", None)
-        suppliers = db.get_suppliers()
+        suppliers = supplier_dao.get_all()
         for s in suppliers:
-            supp_combo.addItem(f"{s['name']} (الرصيد: {format_currency(s['balance'])})", s['id'])
+            supp_combo.addItem(f"{s.name} (الرصيد: {format_currency(s.balance)})", s.id)
 
         layout.addRow("العميل:", cust_combo)
         layout.addRow("المورد:", supp_combo)
@@ -473,9 +414,6 @@ class VouchersWidget(QWidget):
                 layout.labelForField(cust_combo).setVisible(False)
                 layout.labelForField(supp_combo).setVisible(False)
 
-        type_combo.currentTextChanged.connect(update_entity_visibility)
-        update_entity_visibility()
-
         def update_invoice_list():
             typ = type_combo.currentText()
             entity_id = None
@@ -487,34 +425,28 @@ class VouchersWidget(QWidget):
                 invoice_combo.clear()
                 invoice_combo.addItem("بدون فاتورة", None)
                 return
-            invoices = db.get_invoices()
+            invoices = invoice_dao.get_all()
             filtered = []
             for inv in invoices:
-                if typ == "قبض" and inv['customer_id'] == entity_id and inv['type'] == 'sale' and inv['deleted_at'] is None:
+                if typ == "قبض" and inv.customer_id == entity_id and inv.type == 'sale' and inv.deleted_at is None:
                     filtered.append(inv)
-                elif typ == "دفع" and inv['supplier_id'] == entity_id and inv['type'] == 'purchase' and inv['deleted_at'] is None:
+                elif typ == "دفع" and inv.supplier_id == entity_id and inv.type == 'purchase' and inv.deleted_at is None:
                     filtered.append(inv)
             invoice_combo.clear()
             invoice_combo.addItem("بدون فاتورة", None)
             for inv in filtered:
-                remaining = inv['total'] - inv['paid']
-                invoice_combo.addItem(f"{'بيع' if inv['type']=='sale' else 'شراء'} {inv.get('reference','')} - {format_currency(inv['total'])} (متبقي: {format_currency(remaining)})", inv['id'])
+                remaining = inv.total - inv.paid
+                invoice_combo.addItem(f"{'بيع' if inv.type=='sale' else 'شراء'} {inv.reference} - {format_currency(inv.total)} (متبقي: {format_currency(remaining)})", inv.id)
 
         def update_amount_from_invoice():
             inv_id = invoice_combo.currentData()
             if not inv_id:
                 return
-            invoices = db.get_invoices()
-            inv = next((i for i in invoices if i['id'] == inv_id), None)
+            inv = invoice_dao.get_by_id(inv_id)
             if inv:
-                remaining = inv['total'] - inv['paid']
+                remaining = inv.total - inv.paid
                 amount_edit.setValue(remaining)
                 check_balance()
-
-        cust_combo.currentIndexChanged.connect(update_invoice_list)
-        supp_combo.currentIndexChanged.connect(update_invoice_list)
-        type_combo.currentTextChanged.connect(update_invoice_list)
-        invoice_combo.currentIndexChanged.connect(update_amount_from_invoice)
 
         def check_balance():
             typ = type_combo.currentText()
@@ -527,47 +459,56 @@ class VouchersWidget(QWidget):
             if typ == "قبض":
                 cust_id = cust_combo.currentData()
                 if cust_id:
-                    cust = next((c for c in customers if c['id'] == cust_id), None)
+                    cust = next((c for c in customers if c.id == cust_id), None)
                     if cust:
-                        balance = cust['balance']
-                        entity_name = cust['name']
+                        balance = cust.balance
+                        entity_name = cust.name
             elif typ == "دفع":
                 supp_id = supp_combo.currentData()
                 if supp_id:
-                    supp = next((s for s in suppliers if s['id'] == supp_id), None)
+                    supp = next((s for s in suppliers if s.id == supp_id), None)
                     if supp:
-                        balance = supp['balance']
-                        entity_name = supp['name']
+                        balance = supp.balance
+                        entity_name = supp.name
             if amount > balance:
                 warning_label.setText(f"⚠️ المبلغ يتجاوز رصيد {entity_name} الحالي ({format_currency(balance)}). سيتم تسجيل دفعة مقدمة.")
                 warning_label.setVisible(True)
             else:
                 warning_label.setVisible(False)
 
-        amount_edit.valueChanged.connect(check_balance)
-        cust_combo.currentIndexChanged.connect(check_balance)
-        supp_combo.currentIndexChanged.connect(check_balance)
+        type_combo.currentTextChanged.connect(update_entity_visibility)
+        type_combo.currentTextChanged.connect(update_invoice_list)
         type_combo.currentTextChanged.connect(check_balance)
+        cust_combo.currentIndexChanged.connect(update_invoice_list)
+        cust_combo.currentIndexChanged.connect(check_balance)
+        supp_combo.currentIndexChanged.connect(update_invoice_list)
+        supp_combo.currentIndexChanged.connect(check_balance)
+        invoice_combo.currentIndexChanged.connect(update_amount_from_invoice)
+        amount_edit.valueChanged.connect(check_balance)
+        update_entity_visibility()
 
-        if is_edit and voucher_id:
-            vouchers = db.get_vouchers()
-            v = next((v for v in vouchers if v['id'] == voucher_id), None)
+        if is_edit and item_id:
+            vouchers = voucher_dao.get_all()
+            v = next((v for v in vouchers if v['id'] == item_id), None)
             if v:
                 type_combo.setCurrentText("قبض" if v['type'] == 'receipt' else "دفع" if v['type'] == 'payment' else "مصروف")
-                if v['customer_id']:
+                if v.get('customer_id'):
                     idx = cust_combo.findData(v['customer_id'])
-                    if idx >= 0: cust_combo.setCurrentIndex(idx)
-                if v['supplier_id']:
+                    if idx >= 0:
+                        cust_combo.setCurrentIndex(idx)
+                if v.get('supplier_id'):
                     idx = supp_combo.findData(v['supplier_id'])
-                    if idx >= 0: supp_combo.setCurrentIndex(idx)
+                    if idx >= 0:
+                        supp_combo.setCurrentIndex(idx)
                 amount_edit.setValue(v['amount'])
                 date_edit.setDate(QDate.fromString(v['date'], "yyyy-MM-dd"))
-                desc_edit.setText(v.get('description',''))
-                ref_edit.setText(v.get('reference',''))
+                desc_edit.setText(v.get('description', ''))
+                ref_edit.setText(v.get('reference', ''))
                 if v.get('invoice_id'):
                     update_invoice_list()
                     inv_idx = invoice_combo.findData(v['invoice_id'])
-                    if inv_idx >= 0: invoice_combo.setCurrentIndex(inv_idx)
+                    if inv_idx >= 0:
+                        invoice_combo.setCurrentIndex(inv_idx)
 
         def on_save():
             typ = type_combo.currentText()
@@ -605,12 +546,12 @@ class VouchersWidget(QWidget):
                 'invoice_id': invoice_id
             }
             try:
-                if is_edit and voucher_id:
-                    db.delete_voucher(voucher_id)
-                    db.add_voucher(data)
+                if is_edit and item_id:
+                    voucher_dao.delete(item_id)
+                    voucher_dao.add(data)
                     show_toast("تم التعديل بنجاح", "success", dialog)
                 else:
-                    db.add_voucher(data)
+                    voucher_dao.add(data)
                     show_toast("تمت الإضافة بنجاح", "success", dialog)
                 dialog.accept()
                 self.refresh()
@@ -620,15 +561,3 @@ class VouchersWidget(QWidget):
         save_btn.clicked.connect(on_save)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
-
-    def export_to_excel(self):
-        if hasattr(self.table, 'export_to_excel'):
-            self.table.export_to_excel()
-        else:
-            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)
-
-    def print_list(self):
-        if hasattr(self.table, 'print_table'):
-            self.table.print_table()
-        else:
-            show_toast("هذه الميزة غير متوفرة حالياً", "error", self)

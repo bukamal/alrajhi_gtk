@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtCore import QThread, pyqtSignal
-from database import db
+from database import reporting_dao
 
 class ExportWorker(QThread):
     finished = pyqtSignal(bytes)
@@ -8,7 +8,7 @@ class ExportWorker(QThread):
 
     def run(self):
         try:
-            data = db.export_full_database()
+            data = reporting_dao.export_full_database()
             self.finished.emit(data)
         except Exception as e:
             self.error.emit(str(e))
@@ -23,7 +23,7 @@ class ImportWorker(QThread):
 
     def run(self):
         try:
-            db.import_full_database(self.data)
+            reporting_dao.import_full_database(self.data)
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))

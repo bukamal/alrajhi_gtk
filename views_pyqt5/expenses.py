@@ -1,9 +1,12 @@
+# views_pyqt5/expenses.py
 # -*- coding: utf-8 -*-
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableView,
                              QHeaderView, QMessageBox, QDialog, QFormLayout, QLabel, QDateEdit)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QDate
-from database import db
+from PyQt5.QtCore import Qt, QDate, QAbstractTableModel, QModelIndex
+from database import expense_dao
 from utils_pyqt5 import format_currency, show_toast
+from views_pyqt5.centered_dialog import CenteredDialog, show_centered_messagebox
 
 class ExpensesTableModel(QAbstractTableModel):
     def __init__(self, data, headers):
@@ -52,7 +55,7 @@ class ExpensesWidget(QWidget):
 
     def refresh(self):
         search = self.search_edit.text().strip().lower()
-        expenses = db.get_expenses()
+        expenses = expense_dao.get_all()
         if search:
             expenses = [e for e in expenses if search in e.get('description','').lower()]
         data = []
@@ -66,7 +69,7 @@ class ExpensesWidget(QWidget):
         self.table.resizeRowsToContents()
 
     def add_expense(self):
-        dialog = QDialog(self)
+        dialog = CenteredDialog(self)
         dialog.setWindowTitle("إضافة مصروف جديد")
         dialog.setModal(True)
         dialog.setLayoutDirection(Qt.RightToLeft)
@@ -90,16 +93,16 @@ class ExpensesWidget(QWidget):
             try:
                 amount = float(amount_edit.text())
                 if amount <= 0:
-                    show_toast("المبلغ يجب أن يكون أكبر من صفر", "error", dialog)
+                    show_centered_messagebox(dialog, "خطأ", "المبلغ يجب أن يكون أكبر من صفر", QMessageBox.Warning)
                     return
                 date_str = date_edit.date().toString("yyyy-MM-dd")
                 description = desc_edit.text().strip()
-                db.add_expense(amount, date_str, description)
+                expense_dao.add(amount, date_str, description)
                 show_toast("تمت الإضافة", "success", dialog)
                 dialog.accept()
                 self.refresh()
             except:
-                show_toast("المبلغ غير صحيح", "error", dialog)
+                show_centered_messagebox(dialog, "خطأ", "المبلغ غير صحيح", QMessageBox.Warning)
         save_btn.clicked.connect(on_save)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
@@ -107,11 +110,11 @@ class ExpensesWidget(QWidget):
     def delete_expense(self, index):
         row = index.row()
         exp_id = self.model._data[row][0]
-        reply = QMessageBox.question(self, "تأكيد الحذف", "هل تريد حذف هذا المصروف؟", QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "تأكيد الحذف", "هل تريد حذف هذا المصروف؟", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
-                db.delete_expense(exp_id)
+                expense_dao.delete(exp_id)
                 show_toast("تم الحذف", "success")
                 self.refresh()
             except Exception as e:
-                show_toast(str(e), "error")
+                show_centered_messagebox(self, "خطأ", str(e), QMessageBox.Critical)

@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSettings
 from PyQt5.QtGui import QPixmap
 from utils_pyqt5 import format_currency
 from views_pyqt5.centered_dialog import CenteredDialog
+from database import reporting_dao
 
 class WelcomeScreen(CenteredDialog):
     def __init__(self, user_data, summary_data, parent=None):
@@ -78,6 +79,12 @@ class WelcomeScreen(CenteredDialog):
         summary_frame.setStyleSheet("background-color: #0f1724; border-radius: 12px; padding: 10px;")
         summary_layout = QVBoxLayout(summary_frame)
 
+        # الأرقام تبدأ مخفية (***)
+        self.values_hidden = True
+        self.cash_value = summary_data.get('cash_balance', 0)
+        self.sales_value = summary_data.get('total_sales', 0)
+        self.profit_value = summary_data.get('net_profit', 0)
+
         self.cash_label = QLabel(f"💰 رصيد الصندوق: ***")
         self.sales_label = QLabel(f"📈 إجمالي المبيعات: ***")
         self.profit_label = QLabel(f"📊 صافي الربح: ***")
@@ -113,11 +120,6 @@ class WelcomeScreen(CenteredDialog):
         self.opacity_anim.setStartValue(0)
         self.opacity_anim.setEndValue(1)
         self.opacity_anim.start()
-
-        self.values_hidden = True
-        self.cash_value = summary_data.get('cash_balance', 0)
-        self.sales_value = summary_data.get('total_sales', 0)
-        self.profit_value = summary_data.get('net_profit', 0)
 
     def format_hidden_value(self, val):
         if self.values_hidden:

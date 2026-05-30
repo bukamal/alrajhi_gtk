@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QCheckBox
 from PyQt5.QtCore import Qt, QSettings
-from database import db
+from database import user_dao, Session
 from views_pyqt5.centered_dialog import CenteredDialog
 
 class LoginDialog(CenteredDialog):
@@ -77,7 +77,7 @@ class LoginDialog(CenteredDialog):
         if not user or not pwd:
             self.error_label.setText("يرجى إدخال اسم المستخدم وكلمة المرور")
             return
-        if db.login(user, pwd):
+        if user_dao.login(user, pwd):
             if self.remember_check.isChecked():
                 self.settings.setValue("login/username", user)
             else:

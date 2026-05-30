@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys, os
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QProgressBar, QApplication, QMessageBox
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+                             QPushButton, QProgressBar, QApplication, QMessageBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QClipboard
 from activation import online_activate
@@ -131,9 +132,8 @@ class ActivationDialog(CenteredDialog):
         self.cancel_btn.setEnabled(True)
         self.test_btn.setEnabled(True)
         if success:
-            QMessageBox.information(self, "نجاح", "تم التفعيل بنجاح! سيتم إعادة تشغيل التطبيق.")
+            QMessageBox.information(self, "نجاح", "تم التفعيل بنجاح! سيتم متابعة التشغيل.")
             self.accept()
-            os.execl(sys.executable, sys.executable, *sys.argv)
         else:
             self.status_label.setStyleSheet("color: red;")
             if "ConnectionError" in error_msg or "لا يوجد اتصال" in error_msg:
