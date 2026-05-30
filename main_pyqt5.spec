@@ -7,6 +7,13 @@ from PyInstaller.utils.hooks import collect_all
 # جمع بيانات ومكتبات pyzbar
 pyzbar_datas, pyzbar_binaries, pyzbar_hiddenimports = collect_all('pyzbar')
 
+# مسار Qt platforms (للتأكد من وجود qwindows.dll)
+try:
+    import PyQt5
+    qt_platforms_path = os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms')
+except:
+    qt_platforms_path = ''
+
 a = Analysis(
     ['main_pyqt5.py'],
     pathex=[],
@@ -14,7 +21,7 @@ a = Analysis(
         ('libiconv.dll', '.'),
         ('libzbar-64.dll', '.'),
     ],
-    datas=pyzbar_datas,
+    datas=pyzbar_datas + [(qt_platforms_path, 'platforms')] if os.path.exists(qt_platforms_path) else pyzbar_datas,
     hiddenimports=['decimal', 'sqlite3', 'cryptography'] + pyzbar_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
@@ -40,7 +47,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=False,           # يمنع ظهور نافذة طرفية
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
