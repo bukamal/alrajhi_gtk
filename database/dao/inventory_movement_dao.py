@@ -11,7 +11,6 @@ from database.session import get_current_user_id
 class InventoryMovementDAO(BaseDAO):
     def record_movement(self, item_id: int, movement_type: str, quantity: Decimal,
                         unit_cost: Decimal, reference_id: Optional[int] = None):
-        """تسجيل حركة مخزون جديدة وإعادة حساب متوسط التكلفة والكمية"""
         uid = get_current_user_id()
         self._execute("""
             INSERT INTO inventory_movements (item_id, user_id, movement_type, quantity, unit_cost, reference_id, movement_date)
@@ -23,8 +22,6 @@ class InventoryMovementDAO(BaseDAO):
         self._update_quantity(item_id)
 
     def _recalculate_average_cost(self, item_id: int) -> Decimal:
-        """إعادة حساب متوسط التكلفة للمادة بناءً على حركات الشراء"""
-        # استخدام CAST(... AS TEXT) ثم التحويل في Python لتجنب فقدان الدقة
         cur = self._execute("""
             SELECT 
                 CAST(SUM(CAST(quantity AS TEXT)) AS TEXT) as total_qty,
@@ -41,7 +38,6 @@ class InventoryMovementDAO(BaseDAO):
         return avg
 
     def _update_quantity(self, item_id: int) -> Decimal:
-        """تحديث الكمية الحالية للمادة بناءً على جميع الحركات"""
         cur = self._execute("""
             SELECT CAST(SUM(
                 CASE 
@@ -76,7 +72,6 @@ class InventoryMovementDAO(BaseDAO):
         return rows
 
     def reverse_last_movement(self, item_id: int, movement_type: str):
-        """حذف آخر حركة من نوع معين (لتراجع الفاتورة)"""
         if movement_type == 'purchase':
             self._execute("""
                 DELETE FROM inventory_movements

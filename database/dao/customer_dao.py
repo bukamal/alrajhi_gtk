@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+from decimal import Decimal
 from typing import List, Optional
 import sqlite3
 from database.dao.base_dao import BaseDAO

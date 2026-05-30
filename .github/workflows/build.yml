@@ -1,14 +1,15 @@
-name: Build Windows Executable and Installer
+name: Build Windows Executable
 
 on:
   push:
     branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -16,7 +17,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
@@ -24,45 +25,12 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Download ZBar DLL (for pyzbar on Windows)
+    - name: Build with PyInstaller
       run: |
-        curl -L -o libzbar-64.dll https://github.com/NaturalHistoryMuseum/ZBarWin64/raw/master/libzbar-64.dll
+        pyinstaller --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography --hidden-import pyzbar.pyzbar --hidden-import cv2 --onefile --windowed --name AlrajhiAccounting main_pyqt5.py
 
-    - name: Build with PyInstaller (onedir)
-      run: |
-        pyinstaller --onedir --windowed --icon=alrajhi_icon.ico --name "AlrajhiAccounting" `
-          --add-data "data;data" `
-          --add-data "views_pyqt5;views_pyqt5" `
-          --add-data "alrajhi_icon.ico;." `
-          --add-data "alrajhi_logo.png;." `
-          --add-data "libzbar-64.dll;." `
-          --hidden-import PyQt5.sip `
-          --hidden-import qt_material `
-          --hidden-import cryptography `
-          --hidden-import openpyxl `
-          --hidden-import pyqtgraph `
-          --hidden-import qtawesome `
-          --hidden-import cv2 `
-          --hidden-import pyzbar `
-          --hidden-import barcode `
-          --collect-all pyzbar `
-          --collect-all cv2 `
-          main_pyqt5.py
-
-    - name: Install Inno Setup (using Chocolatey)
-      run: choco install innosetup -y
-
-    - name: Build Installer using Inno Setup
-      run: iscc setup.iss
-
-    - name: Upload Installer (setup.exe)
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: AlrajhiAccounting-Setup
-        path: Output/AlrajhiAccounting_Setup.exe
-
-    - name: Upload Portable App Folder
-      uses: actions/upload-artifact@v4
-      with:
-        name: AlrajhiAccounting-Portable
-        path: dist/AlrajhiAccounting/
+        name: AlrajhiAccounting
+        path: dist/AlrajhiAccounting.exe

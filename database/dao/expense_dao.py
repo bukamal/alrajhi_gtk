@@ -26,7 +26,6 @@ class ExpenseDAO(BaseDAO):
         uid = get_current_user_id()
         cur = self._execute("INSERT INTO expenses (user_id, amount, expense_date, description) VALUES (?,?,?,?)",
                             (uid, decimal_to_storage(amount), date, description))
-        # خصم من رصيد الصندوق
         UserDAO().update_cash_balance(amount, add=False)
         self._commit()
         return cur.lastrowid
@@ -36,7 +35,6 @@ class ExpenseDAO(BaseDAO):
         row = self._fetch_one("SELECT amount FROM expenses WHERE id=? AND user_id=?", (exp_id, uid))
         if row:
             amount = storage_to_decimal(row['amount'])
-            # إضافة المبلغ مرة أخرى إلى رصيد الصندوق
             UserDAO().update_cash_balance(amount, add=True)
         self._execute("DELETE FROM expenses WHERE id=? AND user_id=?", (exp_id, uid))
         self._commit()

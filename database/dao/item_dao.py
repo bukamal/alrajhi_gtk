@@ -1,4 +1,4 @@
-# database/dao/item_dao.py (الملف كاملاً مع get_count)
+# database/dao/item_dao.py
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
 import sqlite3
@@ -117,7 +117,6 @@ class ItemDAO(BaseDAO):
         row = self._fetch_one(query, tuple(params))
         return row['cnt'] if row else 0
 
-    # باقي الدوال (get_by_barcode, add, update, delete, units) كما هي
     def get_by_barcode(self, barcode: str) -> Optional[Item]:
         uid = get_current_user_id()
         if not barcode:

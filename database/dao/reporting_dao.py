@@ -204,9 +204,7 @@ class ReportingDAO(BaseDAO):
         """, (uid, uid))
         return [{'month':row['month'], 'profit':storage_to_decimal(row['profit'] or '0')} for row in rows]
 
-    # ========== دوال التصدير والاستيراد ==========
     def export_full_database(self) -> bytes:
-        """تصدير قاعدة البيانات كاملة إلى JSON (للمستخدم الحالي فقط)"""
         tables = ['customers','suppliers','categories','items','item_units','invoices','invoice_lines','vouchers','expenses','users','inventory_movements','exchange_rates']
         data = {}
         uid = UserSession.get_current_user_id()
@@ -225,7 +223,6 @@ class ReportingDAO(BaseDAO):
         return json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
 
     def import_full_database(self, json_bytes: bytes):
-        """استيراد قاعدة البيانات من JSON (للمستخدم الحالي فقط)"""
         data = json.loads(json_bytes.decode('utf-8'))
         self.begin_transaction()
         try:
