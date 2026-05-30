@@ -5,6 +5,9 @@
 import os
 import sys
 
+# ========== Force Windows platform plugin (critical for Windows) ==========
+os.environ["QT_QPA_PLATFORM"] = "windows"
+
 os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
 os.environ["OPENCV_OPENCL_RUNTIME"] = ""
 os.environ["QT_QPA_PLATFORM"] = "xcb"

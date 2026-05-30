@@ -27,9 +27,19 @@ jobs:
         python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libiconv.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
         python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libzbar-64.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
 
+    - name: Get Qt platforms path
+      id: qtpath
+      run: |
+        $path = python -c "import PyQt5, os; print(os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms'))"
+        echo "platforms_path=$path" >> $env:GITHUB_OUTPUT
+
     - name: Build with PyInstaller (OneDir)
       run: |
-        pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." --collect-all pyzbar --collect-all PyQt5 --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography --onedir --name AlrajhiAccounting main_pyqt5.py
+        pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." `
+          --collect-all pyzbar --collect-all PyQt5 `
+          --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography `
+          --add-data "${{ steps.qtpath.outputs.platforms_path }};platforms" `
+          --onedir --name AlrajhiAccounting main_pyqt5.py
 
     - name: Download Inno Setup
       run: |
