@@ -12,9 +12,7 @@ class WelcomeScreen(CenteredDialog):
         self.user_data = user_data
         self.summary_data = summary_data
         self.settings = QSettings("Alrajhi", "Accounting")
-        if self.settings.value("welcome/skip", False, type=bool):
-            self.accept()
-            return
+
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setModal(True)
@@ -79,7 +77,6 @@ class WelcomeScreen(CenteredDialog):
         summary_frame.setStyleSheet("background-color: #0f1724; border-radius: 12px; padding: 10px;")
         summary_layout = QVBoxLayout(summary_frame)
 
-        # الأرقام تبدأ مخفية (***)
         self.values_hidden = True
         self.cash_value = summary_data.get('cash_balance', 0)
         self.sales_value = summary_data.get('total_sales', 0)

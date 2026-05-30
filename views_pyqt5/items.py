@@ -33,7 +33,9 @@ class ItemsWidget(BaseWidget):
     extra_buttons = [
         ("📊 كشف حركة", "show_movement", "btn_movement"),
         ("⚡ تعديل سريع", "quick_edit", "btn_quick_edit"),
-        ("🖨️ طباعة باركود", "print_barcode", "btn_print_barcode"),
+        ("🖨️ طباعة باركود (متقدم)", "print_barcode_advanced", "btn_print_barcode"),
+        ("📷 مسح مستمر", "open_continuous_scanner", "btn_continuous_scan"),
+        ("🖨️ طباعة باركودات متعددة", "batch_print", "btn_batch_print"),
     ]
 
     def __init__(self, parent=None):
@@ -168,7 +170,7 @@ class ItemsWidget(BaseWidget):
                         <td style="padding:8px;">{ref}浏
                     </tr>
                 """
-            html += "</tbody></tr>"
+            html += "</tbody><tr>"
             text_edit = QLabel(html)
             text_edit.setWordWrap(True)
             text_edit.setTextFormat(Qt.RichText)
@@ -293,11 +295,10 @@ class ItemsWidget(BaseWidget):
         dialog.resize(700, 600)
         main_layout = QVBoxLayout(dialog)
 
-        # إنشاء تبويبات (Tabs) لتقسيم المحتوى
         tabs = QTabWidget()
         main_layout.addWidget(tabs)
 
-        # ========== التبويب الأول: المعلومات الأساسية ==========
+        # تبويب المعلومات الأساسية
         basic_tab = QWidget()
         basic_layout = QFormLayout(basic_tab)
         basic_layout.setSpacing(8)
@@ -367,7 +368,7 @@ class ItemsWidget(BaseWidget):
 
         tabs.addTab(basic_tab, "📋 معلومات أساسية")
 
-        # ========== التبويب الثاني: الوحدات الفرعية ==========
+        # تبويب الوحدات الفرعية
         units_tab = QWidget()
         units_layout = QVBoxLayout(units_tab)
         units_layout.setSpacing(8)
@@ -398,16 +399,14 @@ class ItemsWidget(BaseWidget):
 
         tabs.addTab(units_tab, "🔄 الوحدات الفرعية")
 
-        # ========== التبويب الثالث: إحصائيات (يظهر فقط عند التعديل) ==========
+        # تبويب الإحصائيات (يظهر فقط عند التعديل)
         stats_tab = QWidget()
         stats_tab_layout = QVBoxLayout(stats_tab)
         stats_details_label = QLabel()
         stats_details_label.setWordWrap(True)
         stats_details_label.setAlignment(Qt.AlignCenter)
         stats_tab_layout.addWidget(stats_details_label)
-        # سيتم إضافة هذا التبويب فقط إذا كان في وضع التعديل ولدينا بيانات
 
-        # تحميل البيانات إذا كان وضع تعديل
         if is_edit and item_id:
             item = item_dao.get_by_id(item_id)
             if item:
@@ -438,7 +437,7 @@ class ItemsWidget(BaseWidget):
                 stats_details_label.setText(stats_text)
                 tabs.addTab(stats_tab, "📊 إحصائيات")
 
-        # دوال إضافة/حذف الوحدات الفرعية
+        # دوال الوحدات الفرعية
         def add_subunit_dialog():
             sub_dialog = CenteredDialog(dialog)
             sub_dialog.setWindowTitle("إضافة وحدة فرعية")
@@ -520,7 +519,6 @@ class ItemsWidget(BaseWidget):
 
         add_cat_btn.clicked.connect(add_new_category)
 
-        # أزرار الحفظ والإلغاء
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("حفظ")
         save_btn.setObjectName("primary")
@@ -586,3 +584,144 @@ class ItemsWidget(BaseWidget):
         save_btn.clicked.connect(on_save)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
+
+    # ========== دوال الطباعة المتقدمة ==========
+    
+    def get_printer_manager(self):
+        if not hasattr(self, '_printer_manager'):
+            from printer_manager import PrinterManager
+            self._printer_manager = PrinterManager()
+        return self._printer_manager
+    
+    def print_barcode_advanced(self):
+        if not self.current_id:
+            show_toast("لم يتم تحديد مادة", "error", self)
+            return
+        
+        item = self.get_current_item_object()
+        if not item:
+            show_toast("المادة غير موجودة", "error", self)
+            return
+        
+        barcode_text = item.barcode
+        if not barcode_text:
+            show_toast("هذه المادة ليس لها باركود", "error", self)
+            return
+        
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QComboBox, QPushButton, QSpinBox, QFormLayout, QCheckBox
+        from views_pyqt5.centered_dialog import CenteredDialog
+        
+        dialog = CenteredDialog(self)
+        dialog.setWindowTitle("طباعة باركود متقدم")
+        dialog.setLayoutDirection(Qt.RightToLeft)
+        dialog.resize(400, 300)
+        
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        
+        printer_manager = self.get_printer_manager()
+        printer_combo = QComboBox()
+        for p in printer_manager.printers:
+            printer_combo.addItem(p.name, p.id)
+        form.addRow("الطابعة:", printer_combo)
+        
+        copies_spin = QSpinBox()
+        copies_spin.setRange(1, 10)
+        copies_spin.setValue(1)
+        form.addRow("عدد النسخ:", copies_spin)
+        
+        show_price_check = QCheckBox("إظهار السعر على الملصق")
+        form.addRow(show_price_check)
+        
+        layout.addLayout(form)
+        
+        btn_layout = QHBoxLayout()
+        print_btn = QPushButton("طباعة")
+        print_btn.setObjectName("primary")
+        cancel_btn = QPushButton("إلغاء")
+        btn_layout.addWidget(print_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        def do_print():
+            printer_id = printer_combo.currentData()
+            printer_info = printer_manager.get_printer(printer_id)
+            copies = copies_spin.value()
+            show_price = show_price_check.isChecked()
+            price_str = format_currency(item.selling_price) if show_price else ""
+            
+            if not printer_info:
+                show_toast("لم يتم اختيار طابعة", "error", dialog)
+                return
+            
+            if printer_info.type.value == 'serial':
+                from thermal_printer import ThermalPrinter
+                tp = ThermalPrinter(printer_info.connection_string, baudrate=9600)
+                if tp.print_label(barcode_text, item.name, price_str, copies):
+                    show_toast("تمت الطباعة بنجاح", "success", dialog)
+                    dialog.accept()
+                else:
+                    show_toast("فشلت الطباعة، تأكد من اتصال الطابعة", "error", dialog)
+            elif printer_info.type.value == 'pdf':
+                from thermal_printer import PDFPrinter
+                pdf_printer = PDFPrinter(self)
+                if pdf_printer.print_label(barcode_text, item.name, price_str, copies):
+                    show_toast("تم حفظ PDF", "success", dialog)
+                    dialog.accept()
+                else:
+                    show_toast("فشل الحفظ", "error", dialog)
+            elif printer_info.type.value == 'image':
+                from thermal_printer import ImagePrinter
+                img_printer = ImagePrinter(self)
+                if img_printer.print_label(barcode_text, item.name, price_str, copies):
+                    show_toast("تم حفظ الصورة", "success", dialog)
+                    dialog.accept()
+                else:
+                    show_toast("فشل الحفظ", "error", dialog)
+            else:
+                self.print_barcode()
+                dialog.accept()
+        
+        print_btn.clicked.connect(do_print)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    # ========== دوال المسح المستمر ==========
+    
+    def open_continuous_scanner(self):
+        from views_pyqt5.continuous_scanner import ContinuousScanner
+        dialog = ContinuousScanner(self)
+        dialog.barcode_scanned.connect(self.on_barcode_scanned_from_scanner)
+        dialog.exec()
+    
+    def on_barcode_scanned_from_scanner(self, barcode):
+        item = item_dao.get_by_barcode(barcode)
+        if item:
+            reply = QMessageBox.question(self, "إضافة إلى فاتورة", 
+                                         f"المادة: {item.name}\nالسعر: {format_currency(item.selling_price)}\n\nهل تريد إضافتها إلى فاتورة بيع جديدة؟",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                from views_pyqt5.invoice_dialog import InvoiceDialog
+                dialog = InvoiceDialog('sale', self)
+                from PyQt5.QtCore import QTimer
+                def add_item():
+                    dialog.barcode_input.setText(barcode)
+                    dialog.add_item_by_barcode()
+                QTimer.singleShot(100, add_item)
+                dialog.exec()
+        else:
+            show_toast(f"لم يتم العثور على مادة بالباركود: {barcode}", "error", self)
+
+    # ========== طباعة باركودات متعددة دفعة واحدة ==========
+    
+    def batch_print(self):
+        """طباعة باركودات متعددة دفعة واحدة"""
+        from batch_print_dialog import BatchPrintDialog
+        selected_items = []
+        if self.current_id:
+            item = self.get_current_item_object()
+            if item:
+                selected_items = [item]
+        dialog = BatchPrintDialog(self, selected_items)
+        dialog.exec()
+

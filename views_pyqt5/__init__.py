@@ -19,3 +19,5 @@ from .invoice_dialog import InvoiceDialog
 from .global_search import GlobalSearchDialog
 from .base_widget import BaseWidget
 from .centered_dialog import CenteredDialog
+from .change_password_dialog import ChangePasswordDialog, ChangeAdminPasswordDialog
+from .continuous_scanner import ContinuousScanner

@@ -1,15 +1,22 @@
 # database/connection.py
-import sqlcipher3 as sqlite3
 import os
 from typing import Optional
 from datetime import datetime
 import hashlib
-import gc
+import sys
+
+SQLCIPHER_AVAILABLE = False
+try:
+    import sqlcipher3 as sqlite3
+    SQLCIPHER_AVAILABLE = True
+    print("✅ SQLCipher3 متاح، سيتم استخدام التشفير")
+except ImportError:
+    import sqlite3
+    print("⚠️ sqlcipher3 غير مثبت، سيتم استخدام SQLite العادي (بدون تشفير)")
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'alrajhi.db')
 
 def _get_encryption_key() -> bytes:
-    """اشتقاق مفتاح التشفير من معرف الجهاز (لضمان فريد لكل جهاز)"""
     from activation import get_or_create_device_id
     device_id = get_or_create_device_id()
     salt = b'sqlcipher_salt_v1'
@@ -27,16 +34,28 @@ class DatabaseConnection:
 
     def _init_db(self):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        # الاتصال بقاعدة البيانات (سيتم إنشاؤها إذا لم تكن موجودة)
         self._conn = sqlite3.connect(DB_PATH, isolation_level=None)
-        key = _get_encryption_key()
-        # تعيين مفتاح التشفير فوراً بعد فتح الاتصال
-        self._conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
-        # الآن يمكن تنفيذ أوامر PRAGMA الأخرى
-        self._conn.execute("PRAGMA cache_size = -2000")
-        self._conn.execute("PRAGMA temp_store = MEMORY")
+        
+        if SQLCIPHER_AVAILABLE:
+            key = _get_encryption_key()
+            try:
+                self._conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
+                self._conn.execute("SELECT count(*) FROM sqlite_master")
+                print("✅ فتح قاعدة البيانات المشفرة بنجاح")
+            except sqlite3.DatabaseError as e:
+                print(f"⚠️ قاعدة البيانات غير مشفرة أو المفتاح خاطئ: {e}")
+                self._conn.close()
+                if os.path.exists(DB_PATH):
+                    os.remove(DB_PATH)
+                self._conn = sqlite3.connect(DB_PATH, isolation_level=None)
+                self._conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
+                print("✅ تم إنشاء قاعدة بيانات جديدة مشفرة")
+        else:
+            pass
+        
         self._conn.row_factory = sqlite3.Row
         self.init_tables()
+        self._run_migrations()
         self._add_indexes()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -77,7 +96,6 @@ class DatabaseConnection:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # إنشاء الجداول تباعاً
         tables_sql = [
             "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', full_name TEXT, created_at TEXT, last_login TEXT, cash_balance TEXT DEFAULT '0');",
             "CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, name TEXT NOT NULL, phone TEXT, address TEXT, balance TEXT DEFAULT '0', FOREIGN KEY (user_id) REFERENCES users(id), UNIQUE(user_id, name));",
@@ -91,15 +109,20 @@ class DatabaseConnection:
             "CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, amount TEXT DEFAULT '0', expense_date TEXT, description TEXT, FOREIGN KEY (user_id) REFERENCES users(id));",
             "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, name TEXT, type TEXT, balance TEXT DEFAULT '0', FOREIGN KEY (user_id) REFERENCES users(id));",
             "CREATE TABLE IF NOT EXISTS inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL, user_id TEXT NOT NULL, movement_type TEXT NOT NULL, quantity TEXT NOT NULL, unit_cost TEXT, reference_id INTEGER, movement_date TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (item_id) REFERENCES items(id), FOREIGN KEY (user_id) REFERENCES users(id));",
-            "CREATE TABLE IF NOT EXISTS exchange_rates (currency_code TEXT PRIMARY KEY, rate_to_usd TEXT NOT NULL, updated_at TEXT);"
+            "CREATE TABLE IF NOT EXISTS exchange_rates (currency_code TEXT PRIMARY KEY, rate_to_usd TEXT NOT NULL, updated_at TEXT);",
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, updated_at TEXT);"
         ]
 
         for sql in tables_sql:
             cursor.execute(sql)
             conn.commit()
-            gc.collect()
 
-        # إضافة المستخدم admin إذا لم يكن موجوداً
+        cursor.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute("INSERT INTO schema_version (version, updated_at) VALUES (0, ?)", (datetime.now().isoformat(),))
+            conn.commit()
+
         cursor.execute("SELECT id FROM users WHERE username = 'admin'")
         if not cursor.fetchone():
             from database.utils import hash_password
@@ -111,7 +134,6 @@ class DatabaseConnection:
             """, ('admin', 'admin', admin_hash, 'admin', 'المدير العام', now, '0'))
             conn.commit()
 
-        # الحسابات الافتراضية
         default_accounts = [
             ('local_user', 'الصندوق', 'asset', '0'),
             ('local_user', 'المبيعات', 'income', '0'),
@@ -124,7 +146,6 @@ class DatabaseConnection:
             cursor.execute("INSERT OR IGNORE INTO accounts (user_id, name, type, balance) VALUES (?,?,?,?)", acc)
         conn.commit()
 
-        # أسعار الصرف الافتراضية
         now = datetime.now().isoformat()
         default_rates = [
             ('USD', '1.0'), ('EUR', '1.08'), ('GBP', '1.25'),
@@ -133,6 +154,61 @@ class DatabaseConnection:
         for code, rate in default_rates:
             cursor.execute("INSERT OR IGNORE INTO exchange_rates (currency_code, rate_to_usd, updated_at) VALUES (?,?,?)", (code, rate, now))
         conn.commit()
+
+    def _get_schema_version(self) -> int:
+        cur = self.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
+        row = cur.fetchone()
+        return row['version'] if row else 0
+
+    def _set_schema_version(self, version: int):
+        now = datetime.now().isoformat()
+        self.execute("INSERT INTO schema_version (version, updated_at) VALUES (?, ?)", (version, now))
+        self.commit()
+
+    def _run_migrations(self):
+        CURRENT_VERSION = 2
+        current = self._get_schema_version()
+        if current >= CURRENT_VERSION:
+            return
+        print(f"بدء ترحيل قاعدة البيانات من الإصدار {current} إلى {CURRENT_VERSION}")
+
+        if current < 1:
+            self._migrate_to_version_1()
+        if current < 2:
+            self._migrate_to_version_2()
+
+        self._set_schema_version(CURRENT_VERSION)
+        print("تم ترحيل قاعدة البيانات بنجاح")
+
+    def _add_column_if_not_exists(self, table: str, column: str, column_def: str):
+        cursor = self.execute(f"PRAGMA table_info({table})")
+        columns = [row['name'] for row in cursor.fetchall()]
+        if column not in columns:
+            try:
+                self.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+                self.commit()
+                print(f"تم إضافة العمود {column} إلى جدول {table}")
+            except Exception as e:
+                print(f"خطأ في إضافة العمود {column}: {e}")
+
+    def _migrate_to_version_1(self):
+        print("ترحيل إلى الإصدار 1: إضافة أعمدة مفقودة...")
+        self._add_column_if_not_exists('items', 'barcode', 'TEXT')
+        self._add_column_if_not_exists('users', 'cash_balance', 'TEXT DEFAULT "0"')
+        self._add_column_if_not_exists('items', 'unit', 'TEXT')
+        self._add_column_if_not_exists('invoice_lines', 'quantity_in_base', 'TEXT DEFAULT "0"')
+        self._add_column_if_not_exists('invoice_lines', 'unit_cost', 'TEXT DEFAULT "0"')
+        self._add_column_if_not_exists('invoice_lines', 'cost_amount', 'TEXT DEFAULT "0"')
+        self._add_column_if_not_exists('invoices', 'deleted_at', 'TEXT')
+        self._add_column_if_not_exists('invoices', 'paid', 'TEXT DEFAULT "0"')
+        self._add_column_if_not_exists('vouchers', 'reference', 'TEXT')
+        self._add_column_if_not_exists('expenses', 'expense_date', 'TEXT')
+        print("تم الانتهاء من ترحيل الإصدار 1")
+
+    def _migrate_to_version_2(self):
+        print("ترحيل إلى الإصدار 2: إنشاء الفهارس...")
+        self._add_indexes()
+        print("تم الانتهاء من ترحيل الإصدار 2")
 
     def _add_indexes(self):
         indexes = [

@@ -45,7 +45,7 @@ def safe_execute(func, error_msg="حدث خطأ", parent=None):
         return None
 
 def create_auto_backup():
-    """إنشاء نسخة احتياطية تلقائية من قاعدة البيانات"""
+    """إنشاء نسخة احتياطية تلقائية من قاعدة البيانات (تدعم التشفير والعادي)"""
     from database.connection import DB_PATH
     if not os.path.exists(DB_PATH):
         return None

@@ -45,7 +45,7 @@ def save_activation(license_key):
     data = {
         'key': hashlib.sha256(license_key.encode()).hexdigest(),
         'device': get_or_create_device_id(),
-        'expiration': (datetime.now() + timedelta(days=365)).isoformat()
+        'expiration': (datetime.now() + timedelta(days=60)).isoformat()  # 60 يوماً
     }
     os.makedirs(os.path.dirname(LICENSE_FILE), exist_ok=True)
     with open(LICENSE_FILE, 'w') as f:

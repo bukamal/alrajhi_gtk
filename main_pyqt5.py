@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# ========== Fix for OpenCV Qt plugin conflict ==========
 import os
 import sys
 
-# ========== Fix for OpenCV Qt plugin conflict ==========
-os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""   # منع OpenCV من فرض مساره
-os.environ["OPENCV_OPENCL_RUNTIME"] = ""         # تعطيل OpenCL
-os.environ["QT_QPA_PLATFORM"] = "xcb"            # استخدام xcb
-os.environ["OPENCV_QT_PLUGIN_PATH"] = ""         # منع OpenCV من استخدام Qt plugins الخاصة به
-os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu:" + os.environ.get("LD_LIBRARY_PATH", "")
-os.environ["QT_DEBUG_PLUGINS"] = "0"             # إخفاء تحذيرات المكونات الإضافية
-
-# تعطيل تحذيرات zbar إذا لم توجد المكتبة
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
+os.environ["OPENCV_OPENCL_RUNTIME"] = ""
+os.environ["QT_QPA_PLATFORM"] = "xcb"
+os.environ["OPENCV_QT_PLUGIN_PATH"] = ""
 os.environ["PYTHONWARNINGS"] = "ignore"
+os.environ["QT_DEBUG_PLUGINS"] = "0"
 
-# استيراد PyQt5 بعد ضبط البيئة
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QLabel, QFrame, QMenuBar, QAction,
                              QStatusBar, QShortcut, QDialog, QSystemTrayIcon, QMenu)
@@ -47,16 +43,12 @@ except:
 import qt_material
 import qtawesome as qta
 
-from database import reporting_dao, invoice_dao, customer_dao, supplier_dao, item_dao, voucher_dao, expense_dao, exchange_rate_dao
+from database import reporting_dao, invoice_dao, customer_dao, supplier_dao, item_dao, voucher_dao, expense_dao, exchange_rate_dao, Session
 from database.connection import DatabaseConnection
 from activation import check_activation
 from auth import is_admin, get_current_user
 from splash_screen import ModernSplashScreen
 from welcome_screen import WelcomeScreen
-
-# ========== منع OpenCV من التحميل المبكر ==========
-# سنقوم باستيراد barcode_scanner فقط عند الحاجة (في invoice_dialog)
-# لذا لا نستورد أي شيء من barcode_scanner هنا
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -369,11 +361,26 @@ def main():
     if login.exec() != QDialog.Accepted:
         sys.exit(0)
 
+    # ========== التحقق من الحاجة لتغيير كلمة المرور (ترقية SHA256 إلى PBKDF2) ==========
+    if Session.get_force_password_change():
+        from views_pyqt5.change_password_dialog import ChangePasswordDialog
+        dlg = ChangePasswordDialog(Session.get_current_user_id())
+        if dlg.exec():
+            Session.set_force_password_change(False)
+        else:
+            sys.exit(0)
+
     user_data = get_current_user()
     if user_data:
-        summary = reporting_dao.get_summary()
-        welcome = WelcomeScreen(user_data, summary)
-        welcome.exec()
+        from PyQt5.QtCore import QSettings
+        settings = QSettings("Alrajhi", "Accounting")
+        skip_welcome = settings.value("welcome/skip", False, type=bool)
+        if not skip_welcome:
+            summary = reporting_dao.get_summary()
+            welcome = WelcomeScreen(user_data, summary)
+            welcome.exec()
+        else:
+            print("تم تخطي شاشة الترحيب حسب الإعدادات (لم يتم إنشاؤها)")
 
     window = MainWindow()
     window.show()

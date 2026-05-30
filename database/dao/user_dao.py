@@ -39,6 +39,22 @@ class UserDAO(BaseDAO):
             )
         return None
 
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """الحصول على مستخدم بواسطة اسم المستخدم"""
+        row = self._fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+        if row:
+            return User(
+                id=row['id'],
+                username=row['username'],
+                password_hash=row['password_hash'],
+                role=row['role'],
+                full_name=row.get('full_name', ''),
+                created_at=row.get('created_at', ''),
+                last_login=row.get('last_login', ''),
+                cash_balance=storage_to_decimal(row.get('cash_balance', '0'))
+            )
+        return None
+
     def register(self, username: str, password: str, full_name: str = '', role: str = 'user') -> bool:
         try:
             uid = secrets.token_hex(8)
@@ -62,7 +78,7 @@ class UserDAO(BaseDAO):
             users.append(User(
                 id=row['id'],
                 username=row['username'],
-                password_hash='',  # لا نعيد كلمة المرور
+                password_hash='',
                 role=row['role'],
                 full_name=row.get('full_name', ''),
                 created_at=row.get('created_at', ''),

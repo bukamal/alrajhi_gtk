@@ -104,6 +104,11 @@ class SettingsWidget(QWidget):
         self.printer_copies.setValue(self.settings.value("printer_copies", 1, type=int))
         printer_form.addRow("منفذ الطابعة:", self.printer_port)
         printer_form.addRow("عدد النسخ:", self.printer_copies)
+
+        # إضافة قائمة الطابعات المتاحة
+        self.printer_combo = QComboBox()
+        printer_form.addRow("الطابعة الافتراضية:", self.printer_combo)
+
         save_printer_btn = QPushButton("حفظ إعدادات الطابعة")
         save_printer_btn.clicked.connect(self.save_printer_settings)
         printer_form.addRow(save_printer_btn)
@@ -144,7 +149,6 @@ class SettingsWidget(QWidget):
         backup_layout.addWidget(self.reset_btn)
         backup_layout.addWidget(self.logout_btn)
 
-        # إعدادات النسخ الاحتياطي التلقائي
         backup_settings_group = QGroupBox("النسخ الاحتياطي التلقائي")
         backup_settings_layout = QFormLayout(backup_settings_group)
         self.backup_interval = QSpinBox()
@@ -160,8 +164,18 @@ class SettingsWidget(QWidget):
         backup_layout.addStretch()
         tabs.addTab(backup_tab, "💾 نسخ احتياطي")
 
+        # تبويب قوالب الباركود
+        label_tab = QWidget()
+        label_layout = QVBoxLayout(label_tab)
+        edit_template_btn = QPushButton("🎨 تحرير القوالب")
+        edit_template_btn.clicked.connect(self.open_label_designer)
+        label_layout.addWidget(edit_template_btn)
+        label_layout.addStretch()
+        tabs.addTab(label_tab, "🏷️ قوالب الباركود")
+
         self.load_currency_settings()
         self.load_exchange_rates()
+        self.load_printer_settings()
 
     def load_currency_settings(self):
         settings = get_currency_settings()
@@ -292,7 +306,25 @@ class SettingsWidget(QWidget):
     def save_printer_settings(self):
         self.settings.setValue("printer_port", self.printer_port.text())
         self.settings.setValue("printer_copies", self.printer_copies.value())
+        printer_id = self.printer_combo.currentData()
+        if printer_id:
+            from printer_manager import PrinterManager
+            pm = PrinterManager()
+            pm.save_default_printer(printer_id)
         show_toast("تم حفظ إعدادات الطابعة", "success", self)
+
+    def load_printer_settings(self):
+        from printer_manager import PrinterManager
+        self.printer_manager = PrinterManager()
+        self.printer_manager.load_default_printer()
+        self.printer_combo.clear()
+        for p in self.printer_manager.printers:
+            self.printer_combo.addItem(p.name, p.id)
+        default = self.printer_manager.get_default_printer()
+        if default:
+            idx = self.printer_combo.findData(default.id)
+            if idx >= 0:
+                self.printer_combo.setCurrentIndex(idx)
 
     def toggle_touch_mode(self, checked):
         self.settings.setValue("touch_mode", checked)
@@ -375,3 +407,8 @@ class SettingsWidget(QWidget):
             from database.session import UserSession
             UserSession.clear_current_user()
             os.execl(sys.executable, sys.executable, *sys.argv)
+
+    def open_label_designer(self):
+        from label_designer import LabelDesigner
+        dialog = LabelDesigner(self)
+        dialog.exec()

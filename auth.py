@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
 from database import user_dao, Session, get_current_user_id, get_current_user_role
-from database.utils import hash_password, verify_password
+from database.utils import hash_password, verify_password, needs_upgrade
 from typing import Optional, Dict
 
 def login(username: str, password: str) -> bool:
-    return user_dao.login(username, password)
+    success = user_dao.login(username, password)
+    if success:
+        user = user_dao.get_user_by_username(username)
+        if user and needs_upgrade(user.password_hash):
+            Session.set_force_password_change(True)
+    return success
 
 def logout():
     Session.clear_current_user()
