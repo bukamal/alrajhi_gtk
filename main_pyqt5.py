@@ -5,12 +5,16 @@
 import os
 import sys
 
-# ========== Force Windows platform plugin (critical for Windows) ==========
-os.environ["QT_QPA_PLATFORM"] = "windows"
+# ========== Fix for Qt platform plugin (Windows vs Linux) ==========
+if sys.platform == 'win32':
+    os.environ["QT_QPA_PLATFORM"] = "windows"
+elif sys.platform.startswith('linux'):
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+else:
+    os.environ["QT_QPA_PLATFORM"] = "windows"
 
 os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
 os.environ["OPENCV_OPENCL_RUNTIME"] = ""
-os.environ["QT_QPA_PLATFORM"] = "xcb"
 os.environ["OPENCV_QT_PLUGIN_PATH"] = ""
 os.environ["PYTHONWARNINGS"] = "ignore"
 os.environ["QT_DEBUG_PLUGINS"] = "0"
