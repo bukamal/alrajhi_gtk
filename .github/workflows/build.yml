@@ -1,4 +1,4 @@
-name: Build Windows Executable
+name: Build Windows Installer
 
 on:
   push:
@@ -27,12 +27,48 @@ jobs:
         python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libiconv.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
         python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libzbar-64.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
 
-    - name: Build with PyInstaller
+    - name: Build with PyInstaller (OneDir)
       run: |
-        pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." --collect-all pyzbar --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography --onefile --windowed --name AlrajhiAccounting main_pyqt5.py
+        pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." --collect-all pyzbar --collect-all PyQt5 --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography --onedir --name AlrajhiAccounting main_pyqt5.py
 
-    - name: Upload artifact
+    - name: Download Inno Setup
+      run: |
+        curl -L -o is.exe https://jrsoftware.org/download.php/is.exe
+        ./is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
+    - name: Create Installer Script
+      run: |
+        $setupScript = @'
+        [Setup]
+        AppName=الراجحي للمحاسبة
+        AppVersion=1.0
+        DefaultDirName={pf}\AlrajhiAccounting
+        DefaultGroupName=الراجحي للمحاسبة
+        UninstallDisplayIcon={app}\AlrajhiAccounting.exe
+        Compression=lzma2
+        SolidCompression=yes
+        OutputDir=output
+        OutputBaseFilename=AlrajhiAccounting_Setup
+
+        [Files]
+        Source: "dist\AlrajhiAccounting\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+
+        [Icons]
+        Name: "{group}\الراجحي للمحاسبة"; Filename: "{app}\AlrajhiAccounting.exe"
+        Name: "{group}\إلغاء التثبيت"; Filename: "{uninstallexe}"
+        Name: "{userdesktop}\الراجحي للمحاسبة"; Filename: "{app}\AlrajhiAccounting.exe"
+
+        [Run]
+        Filename: "{app}\AlrajhiAccounting.exe"; Description: "تشغيل البرنامج"; Flags: postinstall nowait skipifsilent
+        '@
+        $setupScript | Out-File -FilePath setup.iss -Encoding utf8
+
+    - name: Build Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+
+    - name: Upload Installer
       uses: actions/upload-artifact@v4
       with:
-        name: AlrajhiAccounting
-        path: dist/AlrajhiAccounting.exe
+        name: AlrajhiAccounting_Installer
+        path: output/AlrajhiAccounting_Setup.exe
