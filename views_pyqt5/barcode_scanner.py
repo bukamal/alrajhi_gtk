@@ -115,10 +115,16 @@ if TERMUX_CAMERA_AVAILABLE:
             return getattr(self, 'barcode_data', None)
 
 else:
-    # وضع Linux العادي: استخدام OpenCV
-    import cv2
-    from pyzbar.pyzbar import decode
-    from PyQt5.QtGui import QImage, QPainter, QPen, QColor
+    # وضع Linux العادي: استخدام OpenCV (إن وجد)
+    try:
+        import cv2
+        from pyzbar.pyzbar import decode
+        from PyQt5.QtGui import QImage, QPainter, QPen, QColor
+        CV2_AVAILABLE = True
+    except ImportError:
+        CV2_AVAILABLE = False
+        cv2 = None
+        decode = None
 
     class BarcodeScanner(CenteredDialog):
         barcode_scanned = pyqtSignal(str)
@@ -133,7 +139,7 @@ else:
             self.video_label.setAlignment(Qt.AlignCenter)
             self.video_label.setMinimumSize(640, 480)
             layout.addWidget(self.video_label)
-            self.status_label = QLabel("جاهز للمسح...")
+            self.status_label = QLabel("جاهز للمسح..." if CV2_AVAILABLE else "مكتبات الكاميرا غير مثبتة")
             layout.addWidget(self.status_label)
             self.close_btn = QPushButton("إلغاء")
             self.close_btn.clicked.connect(self.reject)
@@ -144,7 +150,11 @@ else:
             self.cap = None
             self.barcode_data = None
             self.scanning = True
-            self.init_camera()
+            if CV2_AVAILABLE:
+                self.init_camera()
+            else:
+                self.status_label.setText("⚠️ OpenCV غير مثبت، لا يمكن استخدام الكاميرا")
+                self.close_btn.setText("إغلاق")
 
         def init_camera(self):
             try:
@@ -169,7 +179,7 @@ else:
             q_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(q_img)
 
-            if self.scanning:
+            if self.scanning and decode is not None:
                 decoded_objects = decode(frame)
                 for obj in decoded_objects:
                     points = obj.polygon

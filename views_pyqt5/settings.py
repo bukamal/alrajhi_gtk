@@ -336,13 +336,11 @@ class SettingsWidget(QWidget):
         show_toast("تم حفظ إعدادات النسخ الاحتياطي", "success", self)
 
     def export_db(self):
-        # إنشاء QFileDialog في الخيط الرئيسي
         filename, _ = QFileDialog.getSaveFileName(self, "حفظ النسخة الاحتياطية", "alrajhi_backup.json", "JSON (*.json)")
         if not filename:
             return
         self.export_btn.setEnabled(False)
         show_toast("جاري تصدير البيانات...", "info", self)
-        # تمرير اسم الملف فقط إلى العامل
         self.worker = ExportWorker()
         self.worker.finished.connect(lambda data: self._save_export_data(data, filename))
         self.worker.error.connect(self._on_export_error)
@@ -387,7 +385,9 @@ class SettingsWidget(QWidget):
         self.import_btn.setEnabled(True)
 
     def reset_db(self):
-        reply = show_centered_messagebox(self, "إعادة تعيين قاعدة البيانات", "تحذير: سيتم حذف جميع البيانات نهائياً! هل أنت متأكد?", QMessageBox.Warning, QMessageBox.Yes | QMessageBox.No)
+        reply = show_centered_messagebox(self, "إعادة تعيين قاعدة البيانات", 
+                                         "تحذير: سيتم حذف جميع البيانات نهائياً! هل أنت متأكد?", 
+                                         QMessageBox.Warning, QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
                 from database.connection import DB_PATH
@@ -395,12 +395,28 @@ class SettingsWidget(QWidget):
                 db_conn.close()
                 if os.path.exists(DB_PATH):
                     os.remove(DB_PATH)
-                DatabaseConnection()
-                show_toast("تم إعادة التعيين", "success", self)
+                # إنشاء اتصال جديد وإعادة تهيئة الجداول
+                new_conn = DatabaseConnection()
+                # إجبار إعادة التهيئة يدوياً (للتأكد)
+                new_conn.init_tables()
+                new_conn._run_migrations()
+                new_conn._add_indexes()
+                # إعادة تعيين الـ session المحلي
+                from database.session import UserSession
+                # الاحتفاظ بمعرف المستخدم الحالي إن أمكن
+                current_uid = UserSession.get_current_user_id()
+                if current_uid:
+                    # إعادة إنشاء المستخدم admin الافتراضي إذا لم يكن موجوداً
+                    new_conn.check_default_admin_password()
+                show_toast("تم إعادة تعيين قاعدة البيانات بنجاح", "success", self)
                 if self.main_window:
+                    # تحديث جميع الصفحات
+                    for page in self.main_window.pages.values():
+                        if hasattr(page, 'refresh'):
+                            page.refresh()
                     self.main_window.switch_page('dashboard')
             except Exception as e:
-                show_centered_messagebox(self, "خطأ", str(e), QMessageBox.Critical)
+                show_centered_messagebox(self, "خطأ", f"فشل إعادة التعيين: {str(e)}", QMessageBox.Critical)
 
     def logout(self):
         reply = show_centered_messagebox(self, "تسجيل الخروج", "هل تريد تسجيل الخروج؟", QMessageBox.Question, QMessageBox.Yes | QMessageBox.No)

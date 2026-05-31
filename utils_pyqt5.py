@@ -53,9 +53,13 @@ def create_auto_backup():
     os.makedirs(backup_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_file = os.path.join(backup_dir, f'alrajhi_backup_{timestamp}.db')
-    shutil.copy2(DB_PATH, backup_file)
-    # حذف النسخ القديمة (احتفظ بآخر 30 نسخة فقط)
-    backups = sorted([f for f in os.listdir(backup_dir) if f.startswith('alrajhi_backup_')])
-    while len(backups) > 30:
-        os.remove(os.path.join(backup_dir, backups.pop(0)))
-    return backup_file
+    try:
+        shutil.copy2(DB_PATH, backup_file)
+        # حذف النسخ القديمة (احتفظ بآخر 30 نسخة فقط)
+        backups = sorted([f for f in os.listdir(backup_dir) if f.startswith('alrajhi_backup_')])
+        while len(backups) > 30:
+            os.remove(os.path.join(backup_dir, backups.pop(0)))
+        return backup_file
+    except Exception as e:
+        print(f"فشل النسخ الاحتياطي التلقائي: {e}")
+        return None

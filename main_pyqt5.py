@@ -1,24 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# ========== Fix for OpenCV Qt plugin conflict ==========
-import os
 import sys
+import os
 
-# ========== Fix for Qt platform plugin (Windows vs Linux) ==========
-if sys.platform == 'win32':
-    os.environ["QT_QPA_PLATFORM"] = "windows"
-elif sys.platform.startswith('linux'):
-    os.environ["QT_QPA_PLATFORM"] = "xcb"
-else:
-    os.environ["QT_QPA_PLATFORM"] = "windows"
-
+# ========== Fix for Qt platform plugin conflict with opencv ==========
 os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
 os.environ["OPENCV_OPENCL_RUNTIME"] = ""
 os.environ["OPENCV_QT_PLUGIN_PATH"] = ""
-os.environ["PYTHONWARNINGS"] = "ignore"
-os.environ["QT_DEBUG_PLUGINS"] = "0"
 
+# كشف البيئة
+IS_TERMUX = os.path.exists('/data/data/com.termux') or os.environ.get('TERMUX_VERSION')
+IS_WINDOWS = sys.platform == 'win32'
+IS_LINUX = sys.platform.startswith('linux') and not IS_TERMUX
+
+if IS_WINDOWS:
+    os.environ["QT_QPA_PLATFORM"] = "windows"
+elif IS_TERMUX:
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+    os.environ["QT_QPA_PLATFORMTHEME"] = "gtk2"
+    os.environ["QT_QPA_NO_NATIVE_DIALOGS"] = "1"
+elif IS_LINUX:
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+# تعطيل الأصوات التنبيهية في Termux (اختياري)
+if IS_TERMUX:
+    os.environ["QT_ACCESSIBILITY"] = "0"
+    os.environ["QT_QUICK_BACKEND"] = "software"
+
+# ========== Rest of the original main_pyqt5.py ==========
+
+# باقي الكود الأصلي كما هو دون تغيير
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QLabel, QFrame, QMenuBar, QAction,
                              QStatusBar, QShortcut, QDialog, QSystemTrayIcon, QMenu)

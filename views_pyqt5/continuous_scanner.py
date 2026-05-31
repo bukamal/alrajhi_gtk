@@ -6,9 +6,15 @@ import os
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QMessageBox, QFileDialog
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
-import cv2
-from pyzbar.pyzbar import decode
-from PIL import Image
+
+try:
+    import cv2
+    from pyzbar.pyzbar import decode
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
+    decode = None
 
 try:
     from PyQt5.QtMultimedia import QSound
@@ -16,6 +22,7 @@ try:
 except ImportError:
     SOUND_AVAILABLE = False
 
+from PIL import Image
 
 class ContinuousScanner(QDialog):
     barcode_scanned = pyqtSignal(str)
@@ -31,7 +38,7 @@ class ContinuousScanner(QDialog):
 
         layout = QVBoxLayout(self)
 
-        self.status_label = QLabel("جاهز للمسح - اضغط على زر 'التقاط صورة'")
+        self.status_label = QLabel("جاهز للمسح - اضغط على زر 'التقاط صورة'" if CV2_AVAILABLE else "مكتبات الكاميرا غير مثبتة")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
@@ -46,6 +53,7 @@ class ContinuousScanner(QDialog):
         self.capture_btn = QPushButton("📸 التقاط صورة")
         self.capture_btn.clicked.connect(self.capture_photo)
         self.capture_btn.setObjectName("primary")
+        self.capture_btn.setEnabled(CV2_AVAILABLE)
         btn_layout.addWidget(self.capture_btn)
 
         self.close_btn = QPushButton("❌ إغلاق")
@@ -53,9 +61,14 @@ class ContinuousScanner(QDialog):
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
 
-        self.init_camera()
+        if CV2_AVAILABLE:
+            self.init_camera()
+        else:
+            self.status_label.setText("⚠️ OpenCV غير مثبت، لا يمكن استخدام الكاميرا")
 
     def init_camera(self):
+        if not CV2_AVAILABLE:
+            return
         self.cap = cv2.VideoCapture(self.camera_id)
         if not self.cap.isOpened():
             for i in range(5):
@@ -72,7 +85,7 @@ class ContinuousScanner(QDialog):
             self.show_preview()
 
     def show_preview(self):
-        if self.cap and self.cap.isOpened():
+        if CV2_AVAILABLE and self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -84,7 +97,7 @@ class ContinuousScanner(QDialog):
                 self.preview_label.setPixmap(pixmap.scaled(self.preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def capture_photo(self):
-        if not self.cap or not self.cap.isOpened():
+        if not CV2_AVAILABLE or not self.cap or not self.cap.isOpened():
             QMessageBox.warning(self, "خطأ", "الكاميرا غير متاحة")
             return
 
@@ -105,20 +118,21 @@ class ContinuousScanner(QDialog):
         # تحليل الباركود - تجربة عدة تنسيقات
         img = cv2.imread(temp_path)
         decoded = None
-        # 1. BGR مباشرة
-        decoded = decode(img)
-        if not decoded:
-            # 2. RGB
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            decoded = decode(rgb)
-        if not decoded:
-            # 3. Gray
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            decoded = decode(gray)
-        if not decoded:
-            # 4. عبر PIL
-            pil_img = Image.open(temp_path)
-            decoded = decode(pil_img)
+        if decode is not None:
+            # 1. BGR مباشرة
+            decoded = decode(img)
+            if not decoded:
+                # 2. RGB
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                decoded = decode(rgb)
+            if not decoded:
+                # 3. Gray
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                decoded = decode(gray)
+            if not decoded:
+                # 4. عبر PIL
+                pil_img = Image.open(temp_path)
+                decoded = decode(pil_img)
 
         os.unlink(temp_path)
 
@@ -133,6 +147,6 @@ class ContinuousScanner(QDialog):
             self.status_label.setText("❌ لم يتم العثور على باركود. حاول مرة أخرى")
 
     def closeEvent(self, event):
-        if self.cap:
+        if CV2_AVAILABLE and self.cap:
             self.cap.release()
         event.accept()

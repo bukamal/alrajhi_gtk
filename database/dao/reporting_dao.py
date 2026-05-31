@@ -209,27 +209,35 @@ class ReportingDAO(BaseDAO):
     def export_full_database(self) -> bytes:
         conn = DatabaseConnection().get_connection()
         cursor = conn.cursor()
-        tables = ['customers','suppliers','categories','items','item_units','invoices','invoice_lines','vouchers','expenses','users','inventory_movements','exchange_rates']
-        data = {}
         uid = UserSession.get_current_user_id()
         
-        for tbl in tables:
-            if tbl == 'item_units':
-                cursor.execute("""
-                    SELECT iu.* FROM item_units iu
-                    JOIN items i ON iu.item_id = i.id
-                    WHERE i.user_id = ?
-                """, (uid,))
-            elif tbl == 'inventory_movements':
-                # جدول inventory_movements يحتوي على عمود user_id
+        # تكوين الجداول وطريقة الاستعلام
+        tables_config = {
+            'customers': {'has_user_id': True},
+            'suppliers': {'has_user_id': True},
+            'categories': {'has_user_id': True},
+            'items': {'has_user_id': True},
+            'item_units': {'special': "SELECT iu.* FROM item_units iu JOIN items i ON iu.item_id = i.id WHERE i.user_id = ?"},
+            'invoices': {'has_user_id': True},
+            'invoice_lines': {'special': "SELECT il.* FROM invoice_lines il JOIN invoices i ON il.invoice_id = i.id WHERE i.user_id = ?"},
+            'vouchers': {'has_user_id': True},
+            'expenses': {'has_user_id': True},
+            'users': {'special': "SELECT * FROM users WHERE id = ?"},
+            'inventory_movements': {'has_user_id': True},
+            'exchange_rates': {'special': "SELECT * FROM exchange_rates"}
+        }
+        
+        data = {}
+        for tbl, config in tables_config.items():
+            if 'special' in config:
+                cursor.execute(config['special'], (uid,) if '?' in config['special'] else ())
+            elif config.get('has_user_id'):
                 cursor.execute(f"SELECT * FROM {tbl} WHERE user_id = ?", (uid,))
-            elif tbl == 'exchange_rates':
-                # جدول exchange_rates لا يحتوي على user_id (عمومي لجميع المستخدمين)
-                cursor.execute(f"SELECT * FROM {tbl}")
             else:
-                cursor.execute(f"SELECT * FROM {tbl} WHERE user_id = ?", (uid,))
+                cursor.execute(f"SELECT * FROM {tbl}")
             rows = cursor.fetchall()
             data[tbl] = [dict(row) for row in rows]
+        
         return json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
 
     def import_full_database(self, json_bytes: bytes):
@@ -239,7 +247,17 @@ class ReportingDAO(BaseDAO):
         self.begin_transaction()
         try:
             uid = UserSession.get_current_user_id()
-            for tbl, rows in data.items():
+            
+            # تعريف ترتيب الجداول لتجنب مشاكل المفاتيح الخارجية
+            tables_order = ['exchange_rates', 'users', 'customers', 'suppliers', 'categories', 
+                           'items', 'item_units', 'invoices', 'invoice_lines', 'vouchers', 
+                           'expenses', 'inventory_movements']
+            
+            for tbl in tables_order:
+                if tbl not in data:
+                    continue
+                rows = data[tbl]
+                
                 # حذف البيانات القديمة حسب الجدول
                 if tbl == 'item_units':
                     cursor.execute("DELETE FROM item_units WHERE item_id IN (SELECT id FROM items WHERE user_id=?)", (uid,))
@@ -247,17 +265,24 @@ class ReportingDAO(BaseDAO):
                     cursor.execute("DELETE FROM exchange_rates")
                 elif tbl == 'inventory_movements':
                     cursor.execute("DELETE FROM inventory_movements WHERE user_id = ?", (uid,))
+                elif tbl == 'users':
+                    cursor.execute("DELETE FROM users WHERE id = ?", (uid,))
+                elif tbl == 'invoice_lines':
+                    # حذف سطور الفواتير المرتبطة بفواتير المستخدم الحالي
+                    cursor.execute("DELETE FROM invoice_lines WHERE invoice_id IN (SELECT id FROM invoices WHERE user_id=?)", (uid,))
                 else:
+                    # الجداول التي تحتوي على user_id
                     cursor.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (uid,))
                 
                 # إدراج البيانات الجديدة
                 for row in rows:
                     # تعيين user_id للصفوف التي تحتاج إليه
-                    if 'user_id' in row and tbl not in ('exchange_rates',):
+                    if 'user_id' in row and tbl not in ('exchange_rates', 'users'):
                         row['user_id'] = uid
                     cols = ', '.join(row.keys())
                     ph = ', '.join(['?' for _ in row])
                     cursor.execute(f"INSERT INTO {tbl} ({cols}) VALUES ({ph})", list(row.values()))
+            
             conn.commit()
         except Exception as e:
             conn.rollback()
