@@ -33,9 +33,10 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Download ZBar DLLs (for Windows)
+    - name: Download ZBar DLLs (fixed URL)
       run: |
-        curl -L -o zbar.zip https://github.com/NaturalHistoryMuseum/ZBarWin64/releases/download/v0.10/zbar-0.10.zip
+        # استخدام رابط مباشر من موقع ZBar الرسمي (أو مصدر موثوق)
+        curl -L -o zbar.zip https://github.com/mikecramer/ZBarWin64/releases/download/v0.10/ZBarWin64-0.10.zip
         7z x zbar.zip -ozbar_temp -y
         copy zbar_temp\bin\libzbar-64-0.dll .
         copy libzbar-64-0.dll libzbar-64.dll
@@ -48,16 +49,16 @@ jobs:
         echo "platforms_path=$path" >> $env:GITHUB_OUTPUT
       shell: pwsh
 
-    - name: Build with PyInstaller
+    - name: Build with PyInstaller (console mode for debugging)
       run: |
         pyinstaller --add-binary "libzbar-64.dll;." --add-binary "libiconv-2.dll;." `
           --collect-all pyzbar --collect-all PyQt5 `
           --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography `
           --add-data "${{ steps.qtpath.outputs.platforms_path }};platforms" `
           --runtime-hook runtime_hook.py `
-          --onedir --noconsole --name AlrajhiAccounting main_pyqt5.py
+          --onedir --console --name AlrajhiAccounting main_pyqt5.py
 
-    - name: Upload Windows artifact
+    - name: Upload Windows artifact (folder)
       uses: actions/upload-artifact@v4
       with:
         name: AlrajhiAccounting-Windows
@@ -93,12 +94,12 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build with PyInstaller (Linux)
+    - name: Build with PyInstaller (Linux, console mode for debugging)
       run: |
-        pyinstaller --collect-all pyzbar --collect-all PyQt5 `
-          --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography `
-          --runtime-hook runtime_hook.py `
-          --onedir --noconsole --name AlrajhiAccounting main_pyqt5.py
+        pyinstaller --collect-all pyzbar --collect-all PyQt5 \
+          --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography \
+          --runtime-hook runtime_hook.py \
+          --onedir --console --name AlrajhiAccounting main_pyqt5.py
 
     - name: Upload Linux artifact
       uses: actions/upload-artifact@v4
