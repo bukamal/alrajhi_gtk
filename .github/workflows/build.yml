@@ -1,31 +1,20 @@
-name: Build Alrajhi Accounting
+name: Build Windows Installer (Console mode for debugging)
 
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-
-    - name: Cache pip packages
-      uses: actions/cache@v3
-      with:
-        path: ~\AppData\Local\pip\Cache
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
 
     - name: Install dependencies
       run: |
@@ -33,131 +22,68 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Download ZBar DLLs (using working URL)
+    - name: Copy pyzbar DLLs
       run: |
-        curl -L -o zbar.zip https://github.com/pyvideotranscoder/ZBarWin64/releases/download/v0.10/ZBarWin64-0.10.zip
-        7z x zbar.zip -ozbar_temp -y
-        copy zbar_temp\bin\libzbar-64-0.dll .
-        copy libzbar-64-0.dll libzbar-64.dll
-        copy zbar_temp\bin\libiconv-2.dll .
+        python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libiconv.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
+        python -c "import pyzbar, os, shutil; src = os.path.join(os.path.dirname(pyzbar.__file__), 'libzbar-64.dll'); dest = '.'; shutil.copy(src, dest) if os.path.exists(src) else None"
 
     - name: Get Qt platforms path
       id: qtpath
       run: |
         $path = python -c "import PyQt5, os; print(os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms'))"
         echo "platforms_path=$path" >> $env:GITHUB_OUTPUT
-      shell: pwsh
 
-    - name: Build with PyInstaller (console mode for debugging)
+    - name: Build with PyInstaller (OneDir, CONSOLE enabled)
       run: |
-        pyinstaller --add-binary "libzbar-64.dll;." --add-binary "libiconv-2.dll;." `
+        pyinstaller --add-binary "libiconv.dll;." --add-binary "libzbar-64.dll;." `
           --collect-all pyzbar --collect-all PyQt5 `
           --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography `
           --add-data "${{ steps.qtpath.outputs.platforms_path }};platforms" `
-          --runtime-hook runtime_hook.py `
-          --onedir --console --name AlrajhiAccounting main_pyqt5.py
+          --onedir --console --name AlrajhiAccounting_Debug main_pyqt5.py
 
-    - name: Upload Windows artifact (folder)
+    - name: Download Inno Setup
+      run: |
+        curl -L -o is.exe https://jrsoftware.org/download.php/is.exe
+        ./is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
+    - name: Create Installer Script
+      run: |
+        $setupScript = @'
+        [Setup]
+        AppName=Alrajhi Accounting (Debug)
+        AppVersion=1.0
+        DefaultDirName={pf}\AlrajhiAccountingDebug
+        DefaultGroupName=Alrajhi Accounting (Debug)
+        UninstallDisplayIcon={app}\AlrajhiAccounting_Debug.exe
+        Compression=lzma2
+        SolidCompression=yes
+        OutputDir=output
+        OutputBaseFilename=AlrajhiAccounting_Debug_Setup
+        WizardStyle=modern
+        ShowLanguageDialog=yes
+
+        [Languages]
+        Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
+
+        [Files]
+        Source: "dist\AlrajhiAccounting_Debug\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+
+        [Icons]
+        Name: "{group}\Alrajhi Accounting (Debug)"; Filename: "{app}\AlrajhiAccounting_Debug.exe"
+        Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
+        Name: "{userdesktop}\Alrajhi Accounting (Debug)"; Filename: "{app}\AlrajhiAccounting_Debug.exe"
+
+        [Run]
+        Filename: "{app}\AlrajhiAccounting_Debug.exe"; Description: "Run Alrajhi Accounting (Debug Mode)"; Flags: postinstall nowait skipifsilent
+        '@
+        [System.IO.File]::WriteAllText("setup.iss", $setupScript, [System.Text.Encoding]::Default)
+
+    - name: Build Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+
+    - name: Upload Installer
       uses: actions/upload-artifact@v4
       with:
-        name: AlrajhiAccounting-Windows
-        path: dist/AlrajhiAccounting/
-
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Cache pip packages
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-
-    - name: Install system dependencies (for PyQt5 & OpenCV)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 libegl1 libgl1
-
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-
-    - name: Build with PyInstaller (Linux, console mode for debugging)
-      run: |
-        pyinstaller --collect-all pyzbar --collect-all PyQt5 \
-          --hidden-import decimal --hidden-import sqlite3 --hidden-import cryptography \
-          --runtime-hook runtime_hook.py \
-          --onedir --console --name AlrajhiAccounting main_pyqt5.py
-
-    - name: Upload Linux artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AlrajhiAccounting-Linux
-        path: dist/AlrajhiAccounting/
-
-  test-imports:
-    needs: [build-windows, build-linux]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-    - name: Test importing core modules
-      run: |
-        python -c "
-        import sys, os
-        os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication(sys.argv)
-        from database import Session, user_dao
-        from activation import check_activation
-        from utils_pyqt5 import create_auto_backup
-        print('✅ All core modules imported successfully')
-        "
-
-  release:
-    needs: [build-windows, build-linux]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-    - name: Download Windows artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: AlrajhiAccounting-Windows
-        path: AlrajhiAccounting-Windows
-    - name: Download Linux artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: AlrajhiAccounting-Linux
-        path: AlrajhiAccounting-Linux
-    - name: Zip Windows build
-      run: zip -r AlrajhiAccounting-Windows.zip AlrajhiAccounting-Windows
-    - name: Zip Linux build
-      run: zip -r AlrajhiAccounting-Linux.zip AlrajhiAccounting-Linux
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          AlrajhiAccounting-Windows.zip
-          AlrajhiAccounting-Linux.zip
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: AlrajhiAccounting_Debug_Installer
+        path: output/AlrajhiAccounting_Debug_Setup.exe
