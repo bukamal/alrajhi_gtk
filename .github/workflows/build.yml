@@ -33,10 +33,9 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Download ZBar DLLs (fixed URL)
+    - name: Download ZBar DLLs (using working URL)
       run: |
-        # استخدام رابط مباشر من موقع ZBar الرسمي (أو مصدر موثوق)
-        curl -L -o zbar.zip https://github.com/mikecramer/ZBarWin64/releases/download/v0.10/ZBarWin64-0.10.zip
+        curl -L -o zbar.zip https://github.com/pyvideotranscoder/ZBarWin64/releases/download/v0.10/ZBarWin64-0.10.zip
         7z x zbar.zip -ozbar_temp -y
         copy zbar_temp\bin\libzbar-64-0.dll .
         copy libzbar-64-0.dll libzbar-64.dll
